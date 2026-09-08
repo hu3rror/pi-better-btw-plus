@@ -2,13 +2,15 @@
  * Regression tests for the side chat mouse selection (issue #17, C scheme):
  * drag/double-click select with an inverse-video highlight; copying is
  * hotkey-only via Ctrl+C / Ctrl+Shift+C on the retained selection. Runs
- * against the real modules with a mocked TUI/theme; the real copyToClipboard
- * cascade lands on its OSC 52 fallback in CI-like environments (no
- * wl-copy/xclip), which is captured via stdout.
+ * against the real modules with a mocked TUI/theme. The clipboard write
+ * side is mocked (see helpers/clipboard-mock.ts): instead of intercepting
+ * `process.stdout.write` for the OSC 52 fallback — which Windows never
+ * reaches because the native clipboard addon wins — tests assert that the
+ * copied text flowed into the mocked `copyToClipboard`.
  */
 import { describe, expect, test } from "bun:test";
+import type { SideChatOverlay as SideChatOverlayType } from "../srcs/side-chat-overlay.ts";
 import { SideChatMessages } from "../srcs/side-chat-messages.ts";
-import { SideChatOverlay } from "../srcs/side-chat-overlay.ts";
 import {
   isLeftPress,
   isLeftDrag,
@@ -19,18 +21,13 @@ import {
 } from "../srcs/side-chat-mouse.ts";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 
-// Capture the real copyToClipboard cascade at its OSC 52 fallback.
-let osc52Writes: string[] = [];
-(process.stdout as any).write = (s: string) => {
-  const match = /\x1b]52;c;([^\x07]+)\x07/.exec(s);
-  if (match) osc52Writes.push(Buffer.from(match[1], "base64").toString("utf8"));
-  return true;
-};
-const osc52CopiedText = (): string[] => {
-  const out = [...osc52Writes];
-  osc52Writes = [];
-  return out;
-};
+// Shared clipboard write-side mock (must load before side-chat-overlay.ts,
+// which imports copyToClipboard from @earendil-works/pi-coding-agent).
+await import("./helpers/clipboard-mock.ts");
+const { copiedTexts, setCopyImplementation, resetCopyImplementation } =
+  await import("./helpers/clipboard-mock.ts");
+const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
+
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 const theme: any = { fg: (_name: string, text: string) => text };
@@ -52,7 +49,7 @@ const DEFAULT_MESSAGES: any[] = [
   },
 ];
 
-function makeOverlay(): SideChatOverlay {
+function makeOverlay(): SideChatOverlayType {
   const opts: any = {
     tui: {
       terminal: { columns: 120, rows: 40, write: () => {} },
@@ -228,7 +225,7 @@ describe("side-chat-overlay.ts", () => {
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true }); // release
     await tick();
     // No copy on release: selection is retained for the hotkey instead.
-    expect(osc52CopiedText().length).toBe(0);
+    expect(copiedTexts().length).toBe(0);
     const M: any = (overlay as any).messages;
     expect(M.hasSelection()).toBe(true);
     expect(M.getSelectedText()).toBe("hello");
@@ -240,23 +237,22 @@ describe("side-chat-overlay.ts", () => {
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
     await tick();
-    expect(osc52CopiedText().length).toBe(0); // nothing copied at release
+    expect(copiedTexts().length).toBe(0); // nothing copied at release
     overlay.handleInput("\x03"); // raw Ctrl+C terminal byte
     await tick();
-    expect(osc52CopiedText()[0]).toBe("hello");
+    expect(copiedTexts()[0]).toBe("hello");
     // ctrl+shift+c via kitty CSI-u (mod = shift|ctrl + 1 = 6) re-copies
     overlay.handleInput("\x1b[99;6u");
     await tick();
-    expect(osc52CopiedText().length).toBe(1);
+    expect(copiedTexts().length).toBe(1);
     // without a selection, ctrl+c must not copy (falls through to the editor)
     (overlay as any).messages.clearSelection();
     overlay.handleInput("\x03");
     await tick();
-    expect(osc52CopiedText().length).toBe(0);
+    expect(copiedTexts().length).toBe(0);
   });
 
   test("copy feedback shows in the status line (hotkey copy)", async () => {
-    osc52Writes = [];
     const overlay = makeOverlay();
     overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
@@ -265,7 +261,7 @@ describe("side-chat-overlay.ts", () => {
     await tick();
     const M: any = (overlay as any).messages;
     expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
-    osc52CopiedText(); // consume the copy this test produced
+    copiedTexts(); // consume the copy this test produced
   });
 
   test("plain click clears the selection and does not copy", () => {
@@ -274,7 +270,7 @@ describe("side-chat-overlay.ts", () => {
     M.setSelection({ line: 0, col: 0 }, { line: 0, col: 3 });
     overlay.handleMouseEvent({ button: 0, col: 13, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 0, col: 13, row: 5, isRelease: true });
-    expect(osc52CopiedText().length).toBe(0);
+    expect(copiedTexts().length).toBe(0);
     expect(overlay.isMouseDragging()).toBe(false);
   });
 
@@ -293,7 +289,7 @@ describe("side-chat-overlay.ts", () => {
     overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: true });
     await tick();
     expect(M.hasSelection()).toBe(false);
-    expect(osc52CopiedText().length).toBe(0);
+    expect(copiedTexts().length).toBe(0);
   });
 
   test("double-click selects the whole line; copy is hotkey-only", async () => {
@@ -306,11 +302,11 @@ describe("side-chat-overlay.ts", () => {
     await tick();
     // Whole rendered line selected, nothing copied yet.
     expect(M.getSelectedText().startsWith("[You]: hello world")).toBe(true);
-    expect(osc52CopiedText().length).toBe(0);
+    expect(copiedTexts().length).toBe(0);
     // Hotkey copies the line selection.
     overlay.handleInput("\x03");
     await tick();
-    const copied = osc52CopiedText();
+    const copied = copiedTexts();
     expect(copied.length).toBe(1);
     expect(copied[0].startsWith("[You]: hello world")).toBe(true);
   });
@@ -330,7 +326,7 @@ describe("side-chat-overlay.ts", () => {
     expect(clamped).toContain("tool output");
     overlay.handleMouseEvent({ button: 0, col: 14, row: 40, isRelease: true });
     expect(M.hasSelection()).toBe(true);
-    expect(osc52CopiedText().length).toBe(0); // no auto-copy on release
+    expect(copiedTexts().length).toBe(0); // no auto-copy on release
   });
 
   test("click on the header row is not captured as a drag", () => {
@@ -381,7 +377,7 @@ describe("side-chat-overlay.ts", () => {
     expect(M.getSelectedText()).toContain("message number 3");
     overlay.handleInput("\x03");
     await tick();
-    const copied = osc52CopiedText();
+    const copied = copiedTexts();
     expect(copied.length).toBe(1);
     expect(copied[0]).toContain("message number 3");
   });
@@ -401,13 +397,12 @@ describe("side-chat-overlay.ts", () => {
     const overlay = makeOverlay();
     const M: any = (overlay as any).messages;
     M.setSelection({ line: 0, col: 0 }, { line: 0, col: 3 });
-    // Break the OSC 52 fallback so the whole cascade fails.
-    const origWrite = (process.stdout as any).write;
-    (process.stdout as any).write = () => {
+    // Make the mocked clipboard fail so the whole copy path errors out.
+    setCopyImplementation(async () => {
       throw new Error("stdout closed");
-    };
+    });
     const failed = await (overlay as any).copySelectionToClipboard();
-    (process.stdout as any).write = origWrite;
+    resetCopyImplementation();
     expect(failed).toBe(false);
     expect(M.render(80).some((l: string) => l.includes("Copy failed"))).toBe(
       true,
