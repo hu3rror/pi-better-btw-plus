@@ -15,6 +15,8 @@ import {
   isLeftPress,
   isLeftDrag,
   isLeftRelease,
+  isRightPress,
+  isRightRelease,
   isWheelEvent,
   wheelDirection,
   parseSgrMouseEvent,
@@ -106,6 +108,20 @@ describe("side-chat-mouse.ts", () => {
     expect(isLeftPress(rightPress) || isLeftDrag(rightPress)).toBe(false);
     expect(isLeftDrag(leftPress)).toBe(false);
     expect(isLeftPress(leftDrag)).toBe(false);
+  });
+
+  test("classifies right-button events (press vs release)", () => {
+    const rightPress = parseSgrMouseEvent("\x1b[<2;10;5M")!;
+    const rightRelease = parseSgrMouseEvent("\x1b[<2;10;5m")!;
+    const shiftRightPress = parseSgrMouseEvent("\x1b[<6;10;5M")!;
+    const wheelRelease = parseSgrMouseEvent("\x1b[<67;10;5m")!;
+    expect(isRightPress(rightPress)).toBe(true);
+    expect(isRightRelease(rightPress)).toBe(false);
+    expect(isRightRelease(rightRelease)).toBe(true);
+    expect(isRightPress(rightRelease)).toBe(false);
+    // modifier bits (shift = 4) don't change the button identity
+    expect(isRightPress(shiftRightPress)).toBe(true);
+    expect(isRightRelease(wheelRelease)).toBe(false);
   });
 });
 
@@ -407,5 +423,109 @@ describe("side-chat-overlay.ts", () => {
     expect(M.render(80).some((l: string) => l.includes("Copy failed"))).toBe(
       true,
     );
+  });
+
+  test("right-click on a retained selection copies it and shows Copied", async () => {
+    const overlay = makeOverlay();
+    // drag-select "hello" then right-click inside the chat area
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts()).toEqual(["hello"]);
+    const M: any = (overlay as any).messages;
+    expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
+  });
+
+  test("right-click copy keeps the selection; right-click / ctrl+c re-copy", async () => {
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts()).toEqual(["hello"]);
+    expect(M.hasSelection()).toBe(true);
+    expect(M.getSelectedText()).toBe("hello");
+    // another right-click re-copies the same text
+    overlay.handleMouseEvent({ button: 2, col: 21, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 21, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts()).toEqual(["hello"]);
+    // and Ctrl+C still copies the retained selection
+    overlay.handleInput("\x03");
+    await tick();
+    expect(copiedTexts()).toEqual(["hello"]);
+  });
+
+  test("right-click without a selection has no side effect", async () => {
+    const overlay = makeOverlay();
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts().length).toBe(0);
+  });
+
+  test("right-click outside the chat area has no side effect", async () => {
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    M.setSelection({ line: 0, col: 0 }, { line: 0, col: 3 });
+    // press and release on the header row (1-based row 2, above msgTopRow 4)
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 2, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 2, isRelease: true });
+    await tick();
+    expect(copiedTexts().length).toBe(0);
+  });
+
+  test("right-click copy is release-triggered: release position decides", async () => {
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    M.setSelection({ line: 0, col: 0 }, { line: 0, col: 3 });
+    // press in the chat, move out, release over the header → no copy
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 2, isRelease: true });
+    await tick();
+    expect(copiedTexts().length).toBe(0);
+    // mirror: press outside the chat, release inside → no copy either
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 2, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts().length).toBe(0);
+    // a plain right-click inside the chat still copies
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts()).toEqual(["[Yo"]);
+  });
+
+  test("right-click does not disturb an in-flight left drag", async () => {
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
+    expect(overlay.isMouseDragging()).toBe(true);
+    // a stray right release (no press) during the drag must not end it or copy
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    expect(overlay.isMouseDragging()).toBe(true);
+    overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    await tick();
+    expect(M.hasSelection()).toBe(true);
+    expect(copiedTexts().length).toBe(0);
+  });
+
+  test("wheel scrolling keeps working after a right-click", async () => {
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    const before = M.getScrollOffset();
+    // right-click over the chat (no selection → no copy)
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    overlay.handleMouseEvent({ button: 64, col: 20, row: 5, isRelease: false });
+    expect(M.getScrollOffset()).toBeGreaterThanOrEqual(before);
+    expect(copiedTexts().length).toBe(0);
   });
 });

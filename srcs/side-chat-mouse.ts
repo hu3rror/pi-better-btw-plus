@@ -86,3 +86,23 @@ export function isLeftRelease(event: SgrMouseEvent): boolean {
   const button = event.button & 3;
   return button === 0 || button === 3;
 }
+
+/** True for an unmodified right-button press (button 2). */
+export function isRightPress(event: SgrMouseEvent): boolean {
+  return (
+    !event.isRelease &&
+    (event.button & MOTION_FLAG) === 0 &&
+    (event.button & 3) === 2
+  );
+}
+
+/**
+ * True for a right-button release. SGR reports releases with the plain
+ * button code (2) and the 'm' suffix; modifier bits (shift/meta/ctrl) are
+ * masked out, wheel releases (67/68) are excluded.
+ */
+export function isRightRelease(event: SgrMouseEvent): boolean {
+  if (!event.isRelease) return false;
+  if ((event.button & 64) !== 0) return false; // wheel release
+  return (event.button & 3) === 2;
+}

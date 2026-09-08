@@ -37,6 +37,8 @@ import {
   isLeftDrag,
   isLeftPress,
   isLeftRelease,
+  isRightPress,
+  isRightRelease,
   isWheelEvent,
   type SgrMouseEvent,
   wheelDirection,
@@ -166,6 +168,8 @@ export class SideChatOverlay implements Component, Focusable {
   private geometry: ChatGeometry | null = null;
   /** Mouse drag state: set while a left-button selection drag is in progress. */
   private mouseDragging = false;
+  /** Right-press landed in the chat area; the copy action fires on release there. */
+  private rightPressInChat = false;
   private mouseAnchor: CellPos = { line: 0, col: 0 };
   private lastPressTime = 0;
   private lastPressPos: CellPos | null = null;
@@ -234,6 +238,7 @@ export class SideChatOverlay implements Component, Focusable {
    */
   cancelMouseDrag(): void {
     this.mouseDragging = false;
+    this.rightPressInChat = false;
     this.pendingDoubleClick = false;
     this.messages.clearSelection();
   }
@@ -315,6 +320,26 @@ export class SideChatOverlay implements Component, Focusable {
         this.lastReleaseWasDrag = false;
       }
       this.options.tui.requestRender();
+    }
+    if (isRightPress(event)) {
+      // Track where the right press landed; the actual action fires on
+      // release, so a press-then-move-out-then-release copies nothing.
+      this.rightPressInChat =
+        this.screenToChat(event.row - 1, event.col - 1) !== null;
+      return;
+    }
+    if (isRightRelease(event)) {
+      // Right-click copy (release-triggered): over the chat area with an
+      // active mouse selection, copy it and show the status. The selection
+      // stays highlighted, so another right-click / Ctrl+C re-copies. No
+      // selection, or a release elsewhere (header/border/editor), does
+      // nothing.
+      if (!this.rightPressInChat) return;
+      this.rightPressInChat = false;
+      if (this.screenToChat(event.row - 1, event.col - 1) === null) return;
+      if (!this.messages.hasSelection()) return;
+      void this.copySelectionToClipboard();
+      return;
     }
   }
 
