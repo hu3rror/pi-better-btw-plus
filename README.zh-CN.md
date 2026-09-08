@@ -52,6 +52,8 @@ pi install npm:@yceachan/pi-better-btw
   | 只读 | `read`、`grep`、`find`、`ls` ;`peek_main`  ;`config.json.readOnlyExtensionAllowlist` |
   | 编辑 | `read`、`bash`、`edit`、`write`                              |
 
+- `Auto-retry（turn 级重试）` ：读取 pi 的 `settings.retry` 预算（`enabled` / `maxRetries` / `baseDelayMs`，默认值与主会话一致）。瞬时 provider 错误（overloaded / rate limit / 5xx）按指数退避自动重试——状态区显示 `Retrying (n/m) in Xs…` 实时倒计时——重试前剥离失败的 assistant 消息，避免错误重复进入下一次请求。上下文溢出与 abort 永不重试。退避等待中按 `Esc` 立即取消并展示最后一次错误作为最终结果；预算耗尽同理。`enabled: false`（如本地模型调试）时错误零开销直接展示。
+
 ## Usage
 
 用 `/btw`（别名 `/side`）或 `Alt+W`（同时负责后台/显示切换）打开旁路会话。提问后按 `Enter`。

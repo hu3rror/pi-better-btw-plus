@@ -10,7 +10,7 @@ import {
   ExtensionRunner,
 } from "@earendil-works/pi-coding-agent";
 import { FileActivityTracker } from "./file-activity-tracker.ts";
-import { loadConfig } from "./config.ts";
+import { loadConfig, loadRetryPolicy } from "./config.ts";
 import { getExtensionDir, loadPromptPack } from "./prompt-pack.ts";
 import {
   SideChatOverlay,
@@ -211,6 +211,12 @@ export default function sideChatExtension(pi: ExtensionAPI) {
       cwd: ctx.cwd,
       onWarning: (message) => ctx.ui.notify(message, "warning"),
     });
+    // Retry budget (#8, D8): pi's own settings.retry (global settings.json
+    // merged with <cwd>/.pi/settings.json), read fresh at every fork.
+    const retryPolicy = loadRetryPolicy({
+      cwd: ctx.cwd,
+      onWarning: (message) => ctx.ui.notify(message, "warning"),
+    });
     // Prompt pack (#13): read fresh at every fork (no cache) so edits to the
     // manifest files apply on the next fork; per-key fallback + notify.
     const promptPack = loadPromptPack(config.promptPack, {
@@ -249,6 +255,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
             sessionManager: ctx.sessionManager,
             promptPack,
             readOnlyExtensionAllowlist: config.readOnlyExtensionAllowlist,
+            retryPolicy,
             onOverlapWarning: (path) => showOverlapWarning(ctx.ui, path),
             onBackground: () => {
               overlayHandle?.unfocus();

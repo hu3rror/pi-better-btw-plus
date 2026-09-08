@@ -9,8 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig } from "../srcs/config.ts";
-
+import { loadConfig, loadRetryPolicy } from "../srcs/config.ts";
 /** Build a temp three-layer config tree and return a loadConfig handle. */
 function makeTree(overrides: {
   bundle?: unknown;
@@ -245,6 +244,132 @@ describe("config.ts layered resolution", () => {
       expect(
         tree.load({ cwd: nonexistentCwd }).readOnlyExtensionAllowlist,
       ).toEqual(["web_search"]);
+    } finally {
+      tree.cleanup();
+    }
+  });
+});
+
+/**
+ * loadRetryPolicy reads pi's own settings files — global
+ * <agentConfigDir>/settings.json merged with project <cwd>/.pi/settings.json
+ * (project wins per key, pi's deepMergeSettings semantics) — and extracts the
+ * `retry` block with pi's defaults (enabled=true, maxRetries=3, baseDelayMs=2000).
+ */
+describe("loadRetryPolicy (pi settings.retry)", () => {
+  function makeRetryTree(overrides: {
+    global?: unknown;
+    project?: unknown;
+  }) {
+    const root = mkdtempSync(join(tmpdir(), "pi-better-btw-retry-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "cwd");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    if (overrides.global !== undefined)
+      writeFileSync(
+        join(agentDir, "settings.json"),
+        JSON.stringify(overrides.global),
+      );
+    if (overrides.project !== undefined)
+      writeFileSync(
+        join(cwd, ".pi", "settings.json"),
+        JSON.stringify(overrides.project),
+      );
+    const cleanup = () => rmSync(root, { recursive: true, force: true });
+    return {
+      cleanup,
+      agentDir,
+      cwd,
+      load: (opts: { cwd?: string } = {}) =>
+        loadRetryPolicy({ agentConfigDir: agentDir, cwd: opts.cwd ?? cwd }),
+    };
+  }
+
+  test("no settings files anywhere: pi defaults (enabled, maxRetries 3, baseDelayMs 2000)", () => {
+    const tree = makeRetryTree({});
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 3,
+        baseDelayMs: 2000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("global settings.json retry block is read (maxRetries 8 like the host's)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { enabled: true, maxRetries: 8 } },
+    });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 8,
+        baseDelayMs: 2000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("project layer overrides the retry block per key (deep merge, pi semantics)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { enabled: true, maxRetries: 8, baseDelayMs: 2000 } },
+      project: { retry: { maxRetries: 2 } },
+    });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 2,
+        baseDelayMs: 2000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("enabled=false is honored (local-model debugging, zero retry overhead)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { enabled: false, maxRetries: 3 } },
+    });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: false,
+        maxRetries: 3,
+        baseDelayMs: 2000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("invalid JSON settings file is ignored (warned) and defaults hold", () => {
+    const tree = makeRetryTree({});
+    writeFileSync(join(tree.agentDir, "settings.json"), "{ broken !!");
+    const warnings: string[] = [];
+    try {
+      const policy = loadRetryPolicy({
+        agentConfigDir: tree.agentDir,
+        cwd: tree.cwd,
+        onWarning: (m) => warnings.push(m),
+      });
+      expect(policy).toEqual({ enabled: true, maxRetries: 3, baseDelayMs: 2000 });
+      expect(warnings.some((w) => w.includes("settings"))).toBe(true);
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("non-object retry block falls back to defaults", () => {
+    const tree = makeRetryTree({ global: { retry: "disabled" } });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 3,
+        baseDelayMs: 2000,
+      });
     } finally {
       tree.cleanup();
     }

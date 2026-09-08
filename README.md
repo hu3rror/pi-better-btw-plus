@@ -86,6 +86,8 @@ What changed since I opened this side chat?
 
 **Transcript export** — `Alt+E` dumps the btw history (forked context, framing block, conversation, in-flight stream) to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` as a markdown diagnostic artifact, useful for debugging feature work.
 **Fork model switching** — `Alt+M` opens a model picker inside the overlay (`↑/↓` move, `Enter` confirm, `Esc` cancel). It lists the session's scoped models first (`--models` / `enabledModels`), falling back to the available catalogue, and only shows models with configured auth. Confirming swaps the fork agent's runtime model — the next turn uses it without rebuilding the fork — and clamps the thinking level to the new model's capabilities (no-reasoning models go to `off`). The choice is fork-local (ADR 0002): the main session's model is never touched. It survives backgrounding (`Alt+W`) and resets on `Alt+R`/`Alt+N`/`Esc` close. The header shows the current fork model; opening is rejected while streaming.
+**Auto-retry (turn-level)** — reads pi's `settings.retry` budget (`enabled` / `maxRetries` / `baseDelayMs`, same defaults as the main session). Transient provider errors (overloaded / rate limit / 5xx) auto-retry with exponential backoff — the status area shows `Retrying (n/m) in Xs…` with a live countdown — and the failed assistant message is stripped before the retry so it never re-enters the next request. Context overflow and aborts never retry. `Esc` during the backoff cancels the wait and surfaces the last error as the final result; budget exhaustion does the same. With `enabled: false` (e.g. local-model debugging) errors surface immediately with zero overhead.
+
 
 ## Shortcuts
 
@@ -93,7 +95,7 @@ What changed since I opened this side chat?
 | ---- | ---- |
 | `Alt+W` | Open (when closed) / background (when visible) / restore (when hidden) |
 | `Enter` | Send message |
-| `Esc` | Interrupt streaming, or close when idle |
+| `Esc` | Interrupt streaming / cancel the retry backoff, or close when idle |
 | `Alt+R` | Re-fork from latest main context |
 | `Alt+N` | Start empty conversation |
 | `Alt+E` | Export the btw chat history to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |

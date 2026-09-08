@@ -64,7 +64,14 @@ import {
 } from "./model-switch.ts";
 import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
-
+import {
+  classifyRetryable,
+  runWithRetry,
+  type RetryableFailure,
+  type RetryableInput,
+  type RetryAttemptInfo,
+  type RetryPolicy,
+} from "./retry.ts";
 export interface ForkContext {
   messages: AgentMessage[];
   model: Model<any>;
@@ -90,6 +97,8 @@ interface SideChatOverlayOptions {
   promptPack: PromptPack;
   /** Extension tools allowed in read-only mode (config.json, git-untracked). */
   readOnlyExtensionAllowlist: string[];
+  /** `settings.retry` budget/backoff read from pi's settings files (D8). */
+  retryPolicy: RetryPolicy;
   onOverlapWarning: (path: string) => Promise<boolean>;
   onBackground: () => void;
   onClose: (
@@ -220,6 +229,14 @@ export class SideChatOverlay implements Component, Focusable {
   private modelPicker: SelectList | null = null;
   /** Choices backing the open picker (index-aligned with its SelectItems). */
   private modelPickerChoices: ModelChoice[] = [];
+  /**
+   * Per-turn retry cancellation (D9): Esc aborts this controller so the
+   * backoff wait stops and the last error surfaces as the final result. Null
+   * while no turn is in flight.
+   */
+  private retryAbortController: AbortController | null = null;
+  /** Countdown ticker for the retry status line (cleared when the wait ends). */
+  private retryCountdown: NodeJS.Timeout | null = null;
 
   /**
    * Chat area height (message lines): 2.5x the original (~0.35 * rows - 10),
@@ -794,6 +811,61 @@ export class SideChatOverlay implements Component, Focusable {
     this.messages.setToolStatus("");
   }
 
+  /**
+   * Last assistant message in the fork transcript (pi's _findLastAssistantMessage
+   * semantics: includes aborted/error ones). The retry loop classifies this
+   * result after each attempt.
+   */
+  private lastAssistantMessage(): RetryableFailure | undefined {
+    const messages = this.agent.state.messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === "assistant") return msg as RetryableFailure;
+    }
+    return undefined;
+  }
+
+  /**
+   * pi's _prepareRetry cleanup, mirrored: before a retry the failed assistant
+   * message is stripped from the transcript so the error never re-enters the
+   * next request (and agent.continue() can run — it requires a trailing
+   * user/toolResult message). Only an error-stop trailing message is removed;
+   * a successful prior turn's assistant message is left untouched.
+   */
+  private removeTrailingAssistantError(): void {
+    const messages = this.agent.state.messages;
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && last.stopReason === "error") {
+      this.agent.state.messages = messages.slice(0, -1);
+    }
+  }
+
+  private stopRetryCountdown(): void {
+    if (this.retryCountdown) {
+      clearInterval(this.retryCountdown);
+      this.retryCountdown = null;
+    }
+  }
+
+  /**
+   * Retry status line with a live countdown (D10), mirroring pi's
+   * RetryStatusIndicator wording: `Retrying (1/3) in 2s… (Esc to cancel)`.
+   * The spinner is stopped first so its 80ms tick cannot overwrite the status.
+   */
+  private showRetryStatus(info: RetryAttemptInfo): void {
+    this.stopSpinner();
+    const startedAt = Date.now();
+    const renderStatus = () => {
+      const remaining = Math.max(0, info.delayMs - (Date.now() - startedAt));
+      const seconds = Math.ceil(remaining / 1000);
+      this.messages.setToolStatus(
+        `Retrying (${info.attempt}/${info.maxAttempts}) in ${seconds}s… (Esc to cancel)`,
+      );
+      this.options.tui.requestRender();
+    };
+    renderStatus();
+    this.retryCountdown = setInterval(renderStatus, 250);
+  }
   private async handleSubmit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || this.isStreaming || this.disposed) return;
@@ -811,9 +883,48 @@ export class SideChatOverlay implements Component, Focusable {
     this.messages.setStreamingContent("");
     this.messages.setErrorContent("");
     this.startSpinner();
+    // Per-turn retry cancellation (D9): Esc aborts this controller so the
+    // backoff wait stops and the last error surfaces as the final result.
+    this.retryAbortController = new AbortController();
+    const signal = this.retryAbortController.signal;
 
     try {
-      await this.agent.prompt(trimmed);
+      // D9: wrap the turn in the injectable retry loop (issue #8). The first
+      // attempt submits the user text; a retryable failure is then stripped
+      // from the transcript (pi _prepareRetry semantics) and the agent
+      // continues from the same context — never re-submitting the user
+      // message and never feeding the failed message back into the request.
+      let firstAttempt = true;
+      const attempt = async (): Promise<RetryableFailure | undefined> => {
+        this.stopRetryCountdown();
+        if (!firstAttempt) {
+          this.removeTrailingAssistantError();
+          // A mid-stream failure may have streamed partial text: drop it so
+          // the retry starts clean (the error message itself is re-shown by
+          // the render path while we wait).
+          this.streamingContent = "";
+          this.messages.setStreamingContent("");
+          this.startSpinner();
+        }
+        if (firstAttempt) {
+          firstAttempt = false;
+          await this.agent.prompt(trimmed);
+        } else {
+          await this.agent.continue();
+        }
+        return this.lastAssistantMessage();
+      };
+      await runWithRetry({
+        attempt,
+        signal,
+        classify: (result) =>
+          classifyRetryable(
+            result as RetryableInput,
+            this.agent.state.model?.contextWindow ?? 0,
+          ),
+        onAttempt: (info) => this.showRetryStatus(info),
+        policy: this.options.retryPolicy,
+      });
     } catch (e) {
       this.streamingContent = "";
       if (!this.disposed) {
@@ -822,6 +933,8 @@ export class SideChatOverlay implements Component, Focusable {
         );
       }
     } finally {
+      this.stopRetryCountdown();
+      this.retryAbortController = null;
       this.isStreaming = false;
       this.streamingContent = "";
       this.stopSpinner();
@@ -964,6 +1077,10 @@ export class SideChatOverlay implements Component, Focusable {
     }
     if (matchesKey(data, Key.escape)) {
       if (this.isStreaming) {
+        // Esc during the retry backoff cancels the wait (D9) so the last
+        // error surfaces immediately; during an active stream it aborts the
+        // run as before. abort() on a waiting (non-running) agent is a no-op.
+        this.retryAbortController?.abort();
         this.agent.abort();
       } else {
         this.dispose();
@@ -1159,6 +1276,12 @@ export class SideChatOverlay implements Component, Focusable {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinner();
+    if (this.retryAbortController) {
+      // A pending retry wait must not outlive the overlay: abort it so the
+      // turn's handleSubmit settles and the countdown stops.
+      this.retryAbortController.abort();
+      this.stopRetryCountdown();
+    }
     if (this.transientClearTimer) {
       clearTimeout(this.transientClearTimer);
       this.transientClearTimer = null;

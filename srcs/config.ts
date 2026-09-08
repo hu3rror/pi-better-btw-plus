@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { PromptPackManifest } from "./prompt-pack.ts";
-
+import type { RetryPolicy } from "./retry.ts";
 /**
  * Layered config resolution for pi-better-btw.
  *
@@ -45,6 +45,79 @@ export interface LoadConfigOptions {
 
 export const CONFIG_SUBDIR = "pi-better-btw";
 export const USER_CONFIG_DIR = join(homedir(), ".pi", "agent", CONFIG_SUBDIR);
+/** pi's own agent config dir (home of the shared settings.json). */
+export const AGENT_CONFIG_DIR = join(homedir(), ".pi", "agent");
+
+/**
+ * Read pi's `settings.retry` budget (D8). The fork shares pi's settings files
+ * rather than re-declaring them: global <agentConfigDir>/settings.json merged
+ * with project <cwd>/.pi/settings.json (project wins per key, mirroring pi's
+ * deepMergeSettings), then the `retry` block is extracted with pi's defaults
+ * (settingsManager.getRetrySettings: enabled=true, maxRetries=3,
+ * baseDelayMs=2000). Invalid/absent files contribute nothing; a present-but-
+ * unreadable file warns instead of failing the fork.
+ */
+export interface LoadRetryPolicyOptions {
+  /** Agent config dir holding pi's global settings.json (~/.pi/agent). */
+  agentConfigDir?: string;
+  /** cwd for the project layer (<cwd>/.pi/settings.json); skipped when absent. */
+  cwd?: string;
+  onWarning?: (message: string) => void;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Deep merge like pi's deepMergeSettings: nested plain objects merge, arrays/others replace. */
+function deepMergeSettings(
+  base: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    const baseValue = result[key];
+    result[key] =
+      isPlainRecord(baseValue) && isPlainRecord(value)
+        ? deepMergeSettings(baseValue, value)
+        : value;
+  }
+  return result;
+}
+
+function readSettingsFile(
+  path: string,
+  onWarning?: (message: string) => void,
+): Record<string, unknown> {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    return isPlainRecord(raw) ? raw : {};
+  } catch {
+    if (existsSync(path) && onWarning) {
+      onWarning(`pi-better-btw: ignoring invalid settings ${path}`);
+    }
+    return {};
+  }
+}
+
+export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPolicy {
+  const agentConfigDir = options.agentConfigDir ?? AGENT_CONFIG_DIR;
+  const merged = deepMergeSettings(
+    readSettingsFile(join(agentConfigDir, "settings.json"), options.onWarning),
+    options.cwd
+      ? readSettingsFile(join(options.cwd, ".pi", "settings.json"), options.onWarning)
+      : {},
+  );
+  const retry = isPlainRecord(merged.retry) ? merged.retry : {};
+  return {
+    enabled:
+      typeof retry.enabled === "boolean" ? retry.enabled : true,
+    maxRetries:
+      typeof retry.maxRetries === "number" ? retry.maxRetries : 3,
+    baseDelayMs:
+      typeof retry.baseDelayMs === "number" ? retry.baseDelayMs : 2000,
+  };
+}
 
 interface ConfigLayer {
   readOnlyExtensionAllowlist: string[] | undefined;

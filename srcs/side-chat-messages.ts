@@ -413,6 +413,11 @@ export class SideChatMessages implements Component {
     }
 
     if (msg.role === "assistant") {
+      // Error stops surface the error text even when a partial reply streamed
+      // before the failure: the final error is the result to show (issue #8).
+      if (msg.stopReason === "error" && msg.errorMessage) {
+        return wrapTextWithAnsi(theme.fg("error", "[Error]: ") + String(msg.errorMessage), width);
+      }
       const text = msg.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
       if (text) return wrapTextWithAnsi(theme.fg("text", "[Assistant]: ") + text, width);
       if ("errorMessage" in msg && msg.errorMessage) {

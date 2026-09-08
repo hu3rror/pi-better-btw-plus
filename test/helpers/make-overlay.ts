@@ -35,6 +35,7 @@ export type OverlayConstructor = new (opts: any) => SideChatOverlayType;
 export function makeOverlay(
   Overlay: OverlayConstructor,
   messages: any[] = DEFAULT_MESSAGES,
+  overrides: Record<string, unknown> = {},
 ): SideChatOverlayType {
   const opts: any = {
     tui: {
@@ -59,10 +60,12 @@ export function makeOverlay(
       laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
     },
     readOnlyExtensionAllowlist: [],
+    retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
     onOverlapWarning: async () => true,
     onBackground: () => {},
     onExport: () => {},
     onClose: () => {},
+    ...overrides,
   };
   const overlay = new Overlay(opts);
   (overlay as any).messages.setMessages(messages);
