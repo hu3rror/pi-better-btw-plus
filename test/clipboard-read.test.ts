@@ -3,7 +3,9 @@
  * level-by-level fallback. Channels are plain injected functions, so the
  * success / fallback / all-fail paths are covered with fakes instead of
  * touching the host clipboard (prior art: config.test.ts's injected
- * temp-tree pattern).
+ * temp-tree pattern). Outcomes distinguish text, an explicitly empty
+ * clipboard, and no usable channel — the caller (right-click paste, #7)
+ * surfaces a reason-specific hint from that.
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -17,11 +19,16 @@ import {
   readClipboardText,
   readClipboardTextFromSystem,
   type ClipboardReadChannel,
+  type ClipboardReadOutcome,
   type ExecFn,
 } from "../srcs/clipboard-read.ts";
 
-/** Build a channel whose read resolves to text / null or rejects. */
-function channel(name: string, outcome: string | null | Error): ClipboardReadChannel {
+const ok = (text: string): ClipboardReadOutcome => ({ ok: true, text });
+const unavailable: ClipboardReadOutcome = { ok: false, reason: "unavailable" };
+const empty: ClipboardReadOutcome = { ok: false, reason: "empty" };
+
+/** Build a channel whose read resolves to an outcome / rejects. */
+function channel(name: string, outcome: ClipboardReadOutcome | Error): ClipboardReadChannel {
   return {
     name,
     async read() {
@@ -41,54 +48,56 @@ describe("readClipboardText cascade", () => {
   test("returns the first channel's text and stops", async () => {
     let calls = 0;
     const channels: ClipboardReadChannel[] = [
-      { name: "a", read: async () => { calls += 1; return "text-a"; } },
-      { name: "b", read: async () => { calls += 1; return "text-b"; } },
+      { name: "a", read: async () => { calls += 1; return ok("text-a"); } },
+      { name: "b", read: async () => { calls += 1; return ok("text-b"); } },
     ];
-    await expect(readClipboardText(channels)).resolves.toBe("text-a");
+    await expect(readClipboardText(channels)).resolves.toEqual(ok("text-a"));
     expect(calls).toBe(1);
   });
 
-  test("falls back to the next channel when the primary yields null", async () => {
+  test("falls back to the next channel when the primary is unavailable", async () => {
     const result = await readClipboardText([
-      channel("a", null),
-      channel("b", "fallback text"),
+      channel("a", unavailable),
+      channel("b", ok("fallback text")),
     ]);
-    expect(result).toBe("fallback text");
+    expect(result).toEqual(ok("fallback text"));
   });
 
   test("falls back when the primary throws (never rethrows)", async () => {
     const result = await readClipboardText([
       channel("a", new Error("boom")),
-      channel("b", "recovered"),
+      channel("b", ok("recovered")),
     ]);
-    expect(result).toBe("recovered");
+    expect(result).toEqual(ok("recovered"));
   });
 
-  test("returns null when every channel yields null", async () => {
+  test("an explicitly empty clipboard is a definitive answer, no fallback", async () => {
+    let calls = 0;
+    const channels: ClipboardReadChannel[] = [
+      { name: "a", read: async () => { calls += 1; return empty; } },
+      { name: "b", read: async () => { calls += 1; return ok("later"); } },
+    ];
+    await expect(readClipboardText(channels)).resolves.toEqual(empty);
+    expect(calls).toBe(1);
+  });
+
+  test("returns unavailable when every channel is unavailable", async () => {
     await expect(
-      readClipboardText([channel("a", null), channel("b", null)]),
-    ).resolves.toBeNull();
+      readClipboardText([channel("a", unavailable), channel("b", unavailable)]),
+    ).resolves.toEqual(unavailable);
   });
 
-  test("returns null when every channel throws", async () => {
+  test("returns unavailable when every channel throws", async () => {
     await expect(
       readClipboardText([
         channel("a", new Error("x")),
         channel("b", new Error("y")),
       ]),
-    ).resolves.toBeNull();
+    ).resolves.toEqual(unavailable);
   });
 
-  test("returns null for an empty channel list", async () => {
-    await expect(readClipboardText([])).resolves.toBeNull();
-  });
-
-  test("skips an empty-string channel and keeps cascading", async () => {
-    const result = await readClipboardText([
-      channel("a", ""),
-      channel("b", "later"),
-    ]);
-    expect(result).toBe("later");
+  test("returns unavailable for an empty channel list", async () => {
+    await expect(readClipboardText([])).resolves.toEqual(unavailable);
   });
 });
 
@@ -99,28 +108,33 @@ describe("channel factories", () => {
       captured = { command, args: [...args] };
       return { ok: true, stdout: "hello world\r\n" };
     };
-    const text = await makePowerShellChannel({ exec }).read();
-    expect(text).toBe("hello world");
+    const outcome = await makePowerShellChannel({ exec }).read();
+    expect(outcome).toEqual(ok("hello world"));
     expect(captured?.command).toBe("powershell.exe");
     expect(captured?.args[0]).toBe("-NoProfile");
     expect(captured?.args[1]).toBe("-Command");
     expect(captured?.args[2]).toContain("Get-Clipboard -Raw");
   });
 
-  test("powershell channel returns null on failure / empty clipboard", async () => {
-    await expect(makePowerShellChannel({ exec: execFail }).read()).resolves.toBeNull();
-    await expect(
-      makePowerShellChannel({ exec: execOk("") }).read(),
-    ).resolves.toBeNull();
+  test("powershell channel reports unavailable on failure / missing tool", async () => {
+    await expect(makePowerShellChannel({ exec: execFail }).read()).resolves.toEqual(
+      unavailable,
+    );
     await expect(
       makePowerShellChannel({ exec: () => { throw new Error("spawn"); } }).read(),
-    ).resolves.toBeNull();
+    ).resolves.toEqual(unavailable);
+  });
+
+  test("powershell channel reports empty for an exit-0 empty clipboard", async () => {
+    await expect(makePowerShellChannel({ exec: execOk("") }).read()).resolves.toEqual(
+      empty,
+    );
   });
 
   test("powershell channel preserves interior newlines (only the tool one is stripped)", async () => {
     await expect(
       makePowerShellChannel({ exec: execOk("line1\r\nline2\r\n") }).read(),
-    ).resolves.toBe("line1\r\nline2");
+    ).resolves.toEqual(ok("line1\r\nline2"));
   });
 
   test("pbpaste channel reads via pbpaste", async () => {
@@ -129,16 +143,18 @@ describe("channel factories", () => {
       captured = { command, args: [...args] };
       return { ok: true, stdout: "mac text\n" };
     };
-    await expect(makePbpasteChannel({ exec }).read()).resolves.toBe("mac text");
+    await expect(makePbpasteChannel({ exec }).read()).resolves.toEqual(ok("mac text"));
     expect(captured?.command).toBe("pbpaste");
     expect(captured?.args).toEqual([]);
   });
 
-  test("pbpaste channel returns null on failure", async () => {
-    await expect(makePbpasteChannel({ exec: execFail }).read()).resolves.toBeNull();
+  test("pbpaste channel reports unavailable on failure", async () => {
+    await expect(makePbpasteChannel({ exec: execFail }).read()).resolves.toEqual(
+      unavailable,
+    );
     await expect(
       makePbpasteChannel({ exec: () => { throw new Error("spawn"); } }).read(),
-    ).resolves.toBeNull();
+    ).resolves.toEqual(unavailable);
   });
 
   test("osc52 channel writes the query and decodes the reply", async () => {
@@ -147,25 +163,25 @@ describe("channel factories", () => {
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("osc payload"),
     });
-    await expect(chan.read()).resolves.toBe("osc payload");
+    await expect(chan.read()).resolves.toEqual(ok("osc payload"));
     expect(written).toEqual([OSC52_QUERY]);
   });
 
-  test("osc52 channel returns null when the terminal never replies", async () => {
+  test("osc52 channel reports unavailable when the terminal never replies", async () => {
     const chan = makeOsc52Channel({
       write: () => {},
       readReply: async () => null,
     });
-    await expect(chan.read()).resolves.toBeNull();
+    await expect(chan.read()).resolves.toEqual(unavailable);
   });
 
-  test("osc52 channel returns null for an empty / echoed-query reply", async () => {
+  test("osc52 channel reports unavailable for an empty / echoed-query reply", async () => {
     for (const reply of ["\x1b]52;c;\x07", "\x1b]52;c;?\x07", "not a reply"]) {
       const chan = makeOsc52Channel({
         write: () => {},
         readReply: async () => reply,
       });
-      await expect(chan.read()).resolves.toBeNull();
+      await expect(chan.read()).resolves.toEqual(unavailable);
     }
   });
 });
@@ -233,52 +249,64 @@ describe("platform channel matrix", () => {
 describe("readClipboardTextFromSystem end-to-end", () => {
   test("win32: primary success returns the text", async () => {
     const written: string[] = [];
-    const text = await readClipboardTextFromSystem({
+    const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk("from powershell\r\n"),
       write: (s) => written.push(s),
       readReply: async () => null,
     });
-    expect(text).toBe("from powershell");
+    expect(outcome).toEqual(ok("from powershell"));
     expect(written).toEqual([]); // primary succeeded — no OSC 52 query
+  });
+
+  test("win32: empty primary is a definitive answer (no OSC 52 query)", async () => {
+    const written: string[] = [];
+    const outcome = await readClipboardTextFromSystem({
+      platform: "win32",
+      exec: execOk(""),
+      write: (s) => written.push(s),
+      readReply: async () => null,
+    });
+    expect(outcome).toEqual(empty);
+    expect(written).toEqual([]); // empty is definitive — cascade stops
   });
 
   test("win32: primary fails, OSC 52 fallback succeeds", async () => {
     const written: string[] = [];
-    const text = await readClipboardTextFromSystem({
+    const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execFail,
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("from osc52"),
     });
-    expect(text).toBe("from osc52");
+    expect(outcome).toEqual(ok("from osc52"));
     expect(written).toEqual([OSC52_QUERY]);
   });
 
   test("darwin: pbpaste fails, OSC 52 fallback succeeds", async () => {
     const written: string[] = [];
-    const text = await readClipboardTextFromSystem({
+    const outcome = await readClipboardTextFromSystem({
       platform: "darwin",
       exec: execFail,
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("mac fallback"),
     });
-    expect(text).toBe("mac fallback");
+    expect(outcome).toEqual(ok("mac fallback"));
     expect(written).toEqual([OSC52_QUERY]);
   });
 
   test("linux: OSC 52 success", async () => {
     const written: string[] = [];
-    const text = await readClipboardTextFromSystem({
+    const outcome = await readClipboardTextFromSystem({
       platform: "linux",
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("linux clipboard"),
     });
-    expect(text).toBe("linux clipboard");
+    expect(outcome).toEqual(ok("linux clipboard"));
     expect(written).toEqual([OSC52_QUERY]);
   });
 
-  test("all channels fail → null, never throws", async () => {
+  test("all channels fail → unavailable, never throws", async () => {
     await expect(
       readClipboardTextFromSystem({
         platform: "win32",
@@ -286,6 +314,6 @@ describe("readClipboardTextFromSystem end-to-end", () => {
         write: () => {},
         readReply: async () => null,
       }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual(unavailable);
   });
 });

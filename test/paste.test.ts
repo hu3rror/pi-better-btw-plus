@@ -10,6 +10,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { SideChatOverlay as SideChatOverlayType } from "../srcs/side-chat-overlay.ts";
+import { makeOverlay as sharedMakeOverlay } from "./helpers/make-overlay.ts";
 
 // Both mocks must load before side-chat-overlay.ts (it statically imports
 // copyToClipboard from @earendil-works/pi-coding-agent and
@@ -17,57 +18,16 @@ import type { SideChatOverlay as SideChatOverlayType } from "../srcs/side-chat-o
 await import("./helpers/clipboard-mock.ts");
 const { copiedTexts } = await import("./helpers/clipboard-mock.ts");
 await import("./helpers/clipboard-read-mock.ts");
-const { setClipboardReadResult } = await import(
+const { setClipboardReadResult, setClipboardReadEmpty } = await import(
   "./helpers/clipboard-read-mock.ts",
 );
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
+// Overlay harness: the constructor is passed in so the helper stays free of
+// a static overlay import (mock.module ordering is controlled here).
+const makeOverlay = (messages?: any[]) =>
+  sharedMakeOverlay(SideChatOverlay, messages);
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
-
-const theme: any = { fg: (_name: string, text: string) => text };
-const WIDTH = 102;
-const DEFAULT_MESSAGES: any[] = [
-  { role: "user", content: "hello world this is a long message" },
-  {
-    role: "assistant",
-    content: [{ type: "text", text: "assistant reply with some content" }],
-  },
-];
-
-function makeOverlay(): SideChatOverlayType {
-  const opts: any = {
-    tui: {
-      terminal: { columns: 120, rows: 40, write: () => {} },
-      requestRender: () => {},
-    },
-    theme,
-    forkContext: {
-      messages: [],
-      model: { id: "test-model" },
-      systemPrompt: "",
-      thinkingLevel: "off",
-      cwd: "/tmp",
-      extensionTools: [],
-    },
-    tracker: { writeCount: 0 },
-    modelRegistry: {},
-    sessionManager: { getEntries: () => [], getLeafId: () => null },
-    promptPack: {
-      framing: "",
-      focusAnchor: "",
-      laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
-    },
-    readOnlyExtensionAllowlist: [],
-    onOverlapWarning: async () => true,
-    onBackground: () => {},
-    onExport: () => {},
-    onClose: () => {},
-  };
-  const overlay = new SideChatOverlay(opts);
-  (overlay as any).messages.setMessages(DEFAULT_MESSAGES);
-  overlay.render(WIDTH);
-  return overlay;
-}
 
 /** 1-based screen row of the editor's single content line. */
 function editorRow(overlay: SideChatOverlayType): number {
@@ -168,6 +128,18 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     await tick();
     const M: any = (overlay as any).messages;
     expect(M.render(80).some((l: string) => l.includes("Clipboard read failed"))).toBe(
+      true,
+    );
+    expect((overlay as any).editor.getText()).toBe("");
+  });
+
+  test("an empty clipboard shows a distinct hint and leaves the editor untouched", async () => {
+    const overlay = makeOverlay();
+    setClipboardReadEmpty();
+    rightClick(overlay, editorRow(overlay));
+    await tick();
+    const M: any = (overlay as any).messages;
+    expect(M.render(80).some((l: string) => l.includes("Clipboard is empty"))).toBe(
       true,
     );
     expect((overlay as any).editor.getText()).toBe("");

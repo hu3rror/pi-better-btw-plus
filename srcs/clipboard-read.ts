@@ -14,19 +14,31 @@
  * Channels are injected functions, so tests mock success / fallback /
  * all-fail without touching the host clipboard. The reader never throws:
  * a broken channel falls through to the next one and total failure resolves
- * to `null` — whether to surface a hint is the caller's decision.
+ * to `{ ok: false, reason: "unavailable" }` — whether to surface a hint is
+ * the caller's decision.
  */
 import { spawnSync } from "node:child_process";
+
+/**
+ * Outcome of reading the system clipboard: text, an explicitly empty
+ * clipboard (a channel ran and saw nothing), or no usable channel at all.
+ * The empty/unavailable distinction lets callers show a reason-specific
+ * hint ("Clipboard is empty" vs "Clipboard read failed").
+ */
+export type ClipboardReadOutcome =
+  | { ok: true; text: string }
+  | { ok: false; reason: "empty" | "unavailable" };
 
 /** A single clipboard read channel. */
 export interface ClipboardReadChannel {
   /** Channel identity for diagnostics and ordering assertions. */
   readonly name: string;
   /**
-   * Read plain text. Resolve `null` when the channel yields nothing
-   * (tool missing / non-zero exit / empty clipboard / timeout).
+   * Read plain text. Resolve `{ ok: false, reason: "empty" }` when the
+   * channel ran and found the clipboard empty, `unavailable` when it could
+   * not run at all (tool missing / non-zero exit / timeout / no reply).
    */
-  readonly read: () => Promise<string | null>;
+  readonly read: () => Promise<ClipboardReadOutcome>;
 }
 
 /** Result of running one subprocess-based channel. */
@@ -70,21 +82,24 @@ export function defaultExec(
 }
 
 /**
- * Try channels in order and return the first non-empty text. A channel that
- * throws is skipped like one that yields null — the reader never throws.
+ * Try channels in order and return the first usable outcome. A channel that
+ * throws is skipped like one that reports unavailable; an explicitly empty
+ * clipboard is a definitive answer and stops the cascade — the reader
+ * never throws.
  */
 export async function readClipboardText(
   channels: readonly ClipboardReadChannel[],
-): Promise<string | null> {
+): Promise<ClipboardReadOutcome> {
   for (const channel of channels) {
     try {
-      const text = await channel.read();
-      if (text) return text;
+      const outcome = await channel.read();
+      if (outcome.ok) return outcome;
+      if (outcome.reason === "empty") return outcome;
     } catch {
       // Fall through to the next channel.
     }
   }
-  return null;
+  return { ok: false, reason: "unavailable" };
 }
 
 /** Strip the single trailing newline CLI tools append to their output. */
@@ -115,7 +130,7 @@ export interface CommandChannelOptions {
 const PS_GET_CLIPBOARD_SCRIPT =
   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw";
 
-/** Shared shape of the subprocess-based channels: run → strip → null if empty. */
+/** Shared shape of the subprocess-based channels: run → strip → outcome. */
 function makeCommandChannel(
   name: string,
   command: string,
@@ -132,11 +147,14 @@ function makeCommandChannel(
       try {
         result = exec(command, args, { timeoutMs, maxBuffer, env: options.env });
       } catch {
-        return null;
+        return { ok: false, reason: "unavailable" };
       }
-      if (!result.ok) return null;
+      if (!result.ok) return { ok: false, reason: "unavailable" };
       const text = stripOneTrailingNewline(result.stdout);
-      return text.length > 0 ? text : null;
+      // An exit-0 empty output means the clipboard holds no text.
+      return text.length > 0
+        ? { ok: true, text }
+        : { ok: false, reason: "empty" };
     },
   };
 }
@@ -243,7 +261,12 @@ function defaultReadReply(timeoutMs: number): Promise<string | null> {
   });
 }
 
-/** OSC 52 query channel: write the query, read and decode the reply. */
+/**
+ * OSC 52 query channel: write the query, read and decode the reply. A
+ * missing/unparsable reply is reported `unavailable` (the terminal either
+ * does not answer queries or the clipboard is empty — OSC 52 cannot tell
+ * the two apart, so callers treat it as a failed read).
+ */
 export function makeOsc52Channel(
   options: Osc52ChannelOptions = {},
 ): ClipboardReadChannel {
@@ -259,7 +282,11 @@ export function makeOsc52Channel(
       const replyPromise = readReply(timeoutMs);
       write(OSC52_QUERY);
       const raw = await replyPromise;
-      return raw === null ? null : parseOsc52Reply(raw);
+      if (raw === null) return { ok: false, reason: "unavailable" };
+      const text = parseOsc52Reply(raw);
+      return text === null
+        ? { ok: false, reason: "unavailable" }
+        : { ok: true, text };
     },
   };
 }
@@ -304,9 +331,9 @@ export function buildPlatformChannels(
   }
 }
 
-/** Read clipboard text with the current platform's channel matrix. */
+/** Read the clipboard with the current platform's channel matrix. */
 export function readClipboardTextFromSystem(
   options: PlatformChannelsOptions = {},
-): Promise<string | null> {
+): Promise<ClipboardReadOutcome> {
   return readClipboardText(buildPlatformChannels(options));
 }

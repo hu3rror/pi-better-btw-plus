@@ -3,36 +3,40 @@
  *
  * The overlay's paste path calls `readClipboardTextFromSystem()` from
  * clipboard-read.ts. This helper mocks that module with the real exports
- * spread and a settable result, so tests drive small / large / failed reads
- * without touching the host clipboard (mirror of helpers/clipboard-mock.ts,
- * the write-side facility from D13).
+ * spread and a settable outcome, so tests drive small / large / empty /
+ * failed reads without touching the host clipboard (mirror of
+ * helpers/clipboard-mock.ts, the write-side facility from D13).
  *
  * Usage (import this before importing anything that pulls in
  * side-chat-overlay.ts, which statically imports the reader):
  *
  * ```ts
  * await import("./helpers/clipboard-read-mock.ts");
- * const { setClipboardReadResult, resetClipboardRead } = await import(
+ * const { setClipboardReadResult, setClipboardReadEmpty } = await import(
  *   "./helpers/clipboard-read-mock.ts",
  * );
  * const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
  * ```
  *
- * `setClipboardReadResult(null)` simulates every platform channel failing
- * (the reader's contract: resolve null, never throw).
+ * `setClipboardReadResult(null)` simulates every platform channel failing;
+ * `setClipboardReadEmpty()` simulates a readable but empty clipboard.
  */
 import { mock } from "bun:test";
+import type { ClipboardReadOutcome } from "../../srcs/clipboard-read.ts";
 
-let result: string | null = null;
+let result: ClipboardReadOutcome = { ok: false, reason: "unavailable" };
 
 /** Set the text the next clipboard read resolves to (null = read failed). */
 export function setClipboardReadResult(text: string | null): void {
-  result = text;
+  result =
+    text === null
+      ? { ok: false, reason: "unavailable" }
+      : { ok: true, text };
 }
 
-/** Restore the default (failed read). */
-export function resetClipboardRead(): void {
-  result = null;
+/** Simulate a readable clipboard that holds no text. */
+export function setClipboardReadEmpty(): void {
+  result = { ok: false, reason: "empty" };
 }
 
 // Load the real module first, then mock it with only the read entry

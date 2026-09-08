@@ -9,7 +9,6 @@
  * copied text flowed into the mocked `copyToClipboard`.
  */
 import { describe, expect, test } from "bun:test";
-import type { SideChatOverlay as SideChatOverlayType } from "../srcs/side-chat-overlay.ts";
 import { SideChatMessages } from "../srcs/side-chat-messages.ts";
 import {
   isLeftPress,
@@ -22,6 +21,12 @@ import {
   parseSgrMouseEvent,
 } from "../srcs/side-chat-mouse.ts";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
+import {
+  DEFAULT_MESSAGES,
+  OVERLAY_TEST_WIDTH,
+  makeOverlay as sharedMakeOverlay,
+  theme,
+} from "./helpers/make-overlay.ts";
 
 // Shared clipboard write-side mock (must load before side-chat-overlay.ts,
 // which imports copyToClipboard from @earendil-works/pi-coding-agent).
@@ -29,63 +34,12 @@ await import("./helpers/clipboard-mock.ts");
 const { copiedTexts, setCopyImplementation, resetCopyImplementation } =
   await import("./helpers/clipboard-mock.ts");
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
+// Overlay harness: the constructor is passed in so the helper stays free of
+// a static overlay import (mock.module ordering is controlled here).
+const makeOverlay = (messages?: any[]) =>
+  sharedMakeOverlay(SideChatOverlay, messages);
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
-
-const theme: any = { fg: (_name: string, text: string) => text };
-// Width the overlay would compute for 120 columns (floor(120*0.85) = 102; see
-// computeChatGeometry). The hint bar is a fixed two rows regardless of width,
-// so the message-area height is stable; render with the real width for
-// fidelity to the runtime layout that the hardcoded coordinates assume.
-const WIDTH = 102;
-const DEFAULT_MESSAGES: any[] = [
-  { role: "user", content: "hello world this is a long message" },
-  {
-    role: "assistant",
-    content: [{ type: "text", text: "assistant reply with some content" }],
-  },
-  {
-    role: "toolResult",
-    toolName: "bash",
-    content: [{ type: "text", text: "tool output line" }],
-  },
-];
-
-function makeOverlay(): SideChatOverlayType {
-  const opts: any = {
-    tui: {
-      terminal: { columns: 120, rows: 40, write: () => {} },
-      requestRender: () => {},
-    },
-    theme,
-    forkContext: {
-      messages: [],
-      model: { id: "test-model" },
-      systemPrompt: "",
-      thinkingLevel: "off",
-      cwd: "/tmp",
-      extensionTools: [],
-    },
-    tracker: { writeCount: 0 },
-    modelRegistry: {},
-    sessionManager: { getEntries: () => [], getLeafId: () => null },
-    promptPack: {
-      framing: "",
-      focusAnchor: "",
-      laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
-    },
-    readOnlyExtensionAllowlist: [],
-    onOverlapWarning: async () => true,
-    onBackground: () => {},
-    onExport: () => {},
-    onClose: () => {},
-  };
-  const overlay = new SideChatOverlay(opts);
-  (overlay as any).messages.setMessages(DEFAULT_MESSAGES);
-  overlay.render(WIDTH); // innerWidth 98 → two hint rows, chat height as hardcoded
-  return overlay;
-}
-
 describe("side-chat-mouse.ts", () => {
   test("classifies SGR events", () => {
     const wheelUp = parseSgrMouseEvent("\x1b[<64;10;5M")!;
@@ -362,7 +316,7 @@ describe("side-chat-overlay.ts", () => {
         content: `message number ${i}`,
       })),
     );
-    overlay.render(WIDTH);
+    overlay.render(OVERLAY_TEST_WIDTH);
     // Rendered: m0, blank, m1, blank, ... m5, blank (12 lines). Window shows
     // the last 9: content lines 3..11 → m1..m5. Press on window line 4 =
     // content line 7 = m3's line, chat col 7 = "m" of "message".
@@ -379,7 +333,7 @@ describe("side-chat-overlay.ts", () => {
       isRelease: false,
     }); // chat col 12
     M.setToolStatus("✓ Copied 5 chars"); // appends 2 lines → window shifts down
-    overlay.render(WIDTH);
+    overlay.render(OVERLAY_TEST_WIDTH);
     // Release at the same screen position. The anchor must have been
     // translated with the window, so the selection starts at the content
     // that was under the pointer at press time (m3), not the shifted m4.

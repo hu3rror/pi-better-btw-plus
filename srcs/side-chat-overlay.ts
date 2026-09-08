@@ -35,7 +35,10 @@ import {
 } from "@earendil-works/pi-tui";
 import type { FileActivityTracker } from "./file-activity-tracker.ts";
 import { forkSurgery } from "./fork-surgery.ts";
-import { readClipboardTextFromSystem } from "./clipboard-read.ts";
+import {
+  readClipboardTextFromSystem,
+  type ClipboardReadOutcome,
+} from "./clipboard-read.ts";
 import { exportChatHistoryToFile } from "./side-chat-export.ts";
 import {
   isLeftDrag,
@@ -119,8 +122,10 @@ const DRAG_RENDER_INTERVAL_MS = 32;
 /** Feedback shown after a copy, cleared shortly after. */
 const COPIED_STATUS_PREFIX = "✓ Copied ";
 const COPIED_STATUS_CLEAR_MS = 1200;
-/** Degradation hint when the clipboard read fails (C1 returns null). */
+/** Degradation hint when every clipboard read channel fails (C1 unavailable). */
 const PASTE_FAILED_STATUS = "Clipboard read failed";
+/** Hint when the clipboard is readable but holds no text. */
+const PASTE_EMPTY_STATUS = "Clipboard is empty";
 const PASTE_STATUS_CLEAR_MS = 1200;
 
 /** Screen geometry of the overlay widgets (0-based terminal coordinates). */
@@ -199,10 +204,8 @@ export class SideChatOverlay implements Component, Focusable {
   private lastReleaseWasDrag = false;
   /** Timestamp of the last render triggered by a drag motion event (coalescing). */
   private lastDragRenderAt = 0;
-  /** Clears the transient "✓ Copied" status line. */
-  private copyClearTimer: NodeJS.Timeout | null = null;
-  /** Clears the transient clipboard-read-failed hint. */
-  private pasteClearTimer: NodeJS.Timeout | null = null;
+  /** Clears the current transient tool-status line (copy feedback / read-failed hint). */
+  private transientClearTimer: NodeJS.Timeout | null = null;
   /** Leading messages injected from the main lane at fork time (context cite). */
   private forkedMessageCount: number;
   /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
@@ -405,47 +408,51 @@ export class SideChatOverlay implements Component, Focusable {
       return false;
     }
     const status = `${COPIED_STATUS_PREFIX}${Array.from(text).length} chars`;
-    this.messages.setToolStatus(status);
-    this.options.tui.requestRender();
-    if (this.copyClearTimer) clearTimeout(this.copyClearTimer);
-    this.copyClearTimer = setTimeout(() => {
-      this.messages.clearToolStatusIf(status);
-      this.options.tui.requestRender();
-    }, COPIED_STATUS_CLEAR_MS);
+    this.showTransientStatus(status, COPIED_STATUS_CLEAR_MS);
     return true;
   }
 
   /**
    * Right-click paste (issue #7, D4): read plain text from the system
    * clipboard via the injected platform-channel matrix (clipboard-read.ts,
-   * D3 — never throws, null when every channel fails), then route the text
-   * through the Editor's built-in paste entry (bracketed paste), so
-   * normalization (\r→\n, \t→4 spaces), large-paste collapse to a
-   * `[paste #N …]` marker and the atomic undo snapshot all come from the
-   * Editor itself — identical to a native terminal paste. On read failure
-   * the editor is left untouched and a transient hint is shown.
+   * D3 — never throws), then route the text through the Editor's built-in
+   * paste entry (bracketed paste), so normalization (\r→\n, \t→4 spaces),
+   * large-paste collapse to a `[paste #N …]` marker and the atomic undo
+   * snapshot all come from the Editor itself — identical to a native
+   * terminal paste. When the read fails or the clipboard holds no text the
+   * editor is left untouched and a transient, reason-specific hint is shown.
    */
   private async pasteFromClipboard(): Promise<void> {
-    let text: string | null;
+    let outcome: ClipboardReadOutcome;
     try {
-      text = await readClipboardTextFromSystem();
+      outcome = await readClipboardTextFromSystem();
     } catch {
-      text = null;
+      outcome = { ok: false, reason: "unavailable" };
     }
-    if (!text) {
-      this.messages.setToolStatus(PASTE_FAILED_STATUS);
-      this.options.tui.requestRender();
-      if (this.pasteClearTimer) clearTimeout(this.pasteClearTimer);
-      this.pasteClearTimer = setTimeout(() => {
-        this.messages.clearToolStatusIf(PASTE_FAILED_STATUS);
-        this.options.tui.requestRender();
-      }, PASTE_STATUS_CLEAR_MS);
+    if (!outcome.ok) {
+      const status =
+        outcome.reason === "empty" ? PASTE_EMPTY_STATUS : PASTE_FAILED_STATUS;
+      this.showTransientStatus(status, PASTE_STATUS_CLEAR_MS);
       return;
     }
     // Bracketed paste is the only paste entry the Editor exposes (handlePaste
     // is private); the same sequences a native terminal paste produces.
-    this.editor.handleInput(`\x1b[200~${text}\x1b[201~`);
+    this.editor.handleInput(`\x1b[200~${outcome.text}\x1b[201~`);
     this.options.tui.requestRender();
+  }
+
+  /**
+   * Show a tool-status line that clears itself after `clearMs`. Shared by
+   * the copy feedback and the clipboard-read hints.
+   */
+  private showTransientStatus(status: string, clearMs: number): void {
+    this.messages.setToolStatus(status);
+    this.options.tui.requestRender();
+    if (this.transientClearTimer) clearTimeout(this.transientClearTimer);
+    this.transientClearTimer = setTimeout(() => {
+      this.messages.clearToolStatusIf(status);
+      this.options.tui.requestRender();
+    }, clearMs);
   }
 
   /** True when a screen row falls inside the input editor widget band. */
@@ -1152,13 +1159,9 @@ export class SideChatOverlay implements Component, Focusable {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinner();
-    if (this.copyClearTimer) {
-      clearTimeout(this.copyClearTimer);
-      this.copyClearTimer = null;
-    }
-    if (this.pasteClearTimer) {
-      clearTimeout(this.pasteClearTimer);
-      this.pasteClearTimer = null;
+    if (this.transientClearTimer) {
+      clearTimeout(this.transientClearTimer);
+      this.transientClearTimer = null;
     }
     const messages = [...this.agent.state.messages];
     this.agent.abort();
