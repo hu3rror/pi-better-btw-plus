@@ -35,6 +35,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { FileActivityTracker } from "./file-activity-tracker.ts";
 import { forkSurgery } from "./fork-surgery.ts";
+import { readClipboardTextFromSystem } from "./clipboard-read.ts";
 import { exportChatHistoryToFile } from "./side-chat-export.ts";
 import {
   isLeftDrag,
@@ -118,8 +119,11 @@ const DRAG_RENDER_INTERVAL_MS = 32;
 /** Feedback shown after a copy, cleared shortly after. */
 const COPIED_STATUS_PREFIX = "✓ Copied ";
 const COPIED_STATUS_CLEAR_MS = 1200;
+/** Degradation hint when the clipboard read fails (C1 returns null). */
+const PASTE_FAILED_STATUS = "Clipboard read failed";
+const PASTE_STATUS_CLEAR_MS = 1200;
 
-/** Screen geometry of the chat message area (0-based terminal coordinates). */
+/** Screen geometry of the overlay widgets (0-based terminal coordinates). */
 interface ChatGeometry {
   /** Screen row of the first message line. */
   msgTopRow: number;
@@ -129,6 +133,10 @@ interface ChatGeometry {
   innerWidth: number;
   /** Number of visible message lines. */
   msgHeight: number;
+  /** Screen row of the input editor widget's top border. */
+  editorTopRow: number;
+  /** Height of the input editor widget in rows (border + content + border). */
+  editorHeight: number;
 }
 
 /**
@@ -181,6 +189,8 @@ export class SideChatOverlay implements Component, Focusable {
   private mouseDragging = false;
   /** Right-press landed in the chat area; the copy action fires on release there. */
   private rightPressInChat = false;
+  /** Right-press landed in the input editor; the paste action fires on release there. */
+  private rightPressInEditor = false;
   private mouseAnchor: CellPos = { line: 0, col: 0 };
   private lastPressTime = 0;
   private lastPressPos: CellPos | null = null;
@@ -191,6 +201,8 @@ export class SideChatOverlay implements Component, Focusable {
   private lastDragRenderAt = 0;
   /** Clears the transient "✓ Copied" status line. */
   private copyClearTimer: NodeJS.Timeout | null = null;
+  /** Clears the transient clipboard-read-failed hint. */
+  private pasteClearTimer: NodeJS.Timeout | null = null;
   /** Leading messages injected from the main lane at fork time (context cite). */
   private forkedMessageCount: number;
   /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
@@ -254,6 +266,7 @@ export class SideChatOverlay implements Component, Focusable {
   cancelMouseDrag(): void {
     this.mouseDragging = false;
     this.rightPressInChat = false;
+    this.rightPressInEditor = false;
     this.pendingDoubleClick = false;
     this.messages.clearSelection();
   }
@@ -340,23 +353,34 @@ export class SideChatOverlay implements Component, Focusable {
     }
     if (isRightPress(event)) {
       // Track where the right press landed; the actual action fires on
-      // release, so a press-then-move-out-then-release copies nothing.
+      // release, so a press-then-move-out-then-release does nothing.
       this.rightPressInChat =
         this.screenToChat(event.row - 1, event.col - 1) !== null;
+      this.rightPressInEditor = this.isOverEditor(event.row - 1);
       return;
     }
     if (isRightRelease(event)) {
-      // Right-click copy (release-triggered): over the chat area with an
-      // active mouse selection, copy it and show the status. The selection
-      // stays highlighted, so another right-click / Ctrl+C re-copies. No
-      // selection, or a release elsewhere (header/border/editor), does
-      // nothing.
-      if (!this.rightPressInChat) return;
+      // Right-click (release-triggered), one shared hit branch per D2: a
+      // press+release over the chat area with an active mouse selection
+      // copies it; a press+release over the input editor pastes the system
+      // clipboard. The release position decides — pressing in one area and
+      // releasing in the other does nothing, and a release elsewhere
+      // (header/border) is ignored.
+      const pressInChat = this.rightPressInChat;
+      const pressInEditor = this.rightPressInEditor;
       this.rightPressInChat = false;
-      if (this.screenToChat(event.row - 1, event.col - 1) === null) return;
-      if (!this.messages.hasSelection()) return;
-      void this.copySelectionToClipboard();
-      return;
+      this.rightPressInEditor = false;
+      if (pressInChat) {
+        if (this.screenToChat(event.row - 1, event.col - 1) === null) return;
+        if (!this.messages.hasSelection()) return;
+        void this.copySelectionToClipboard();
+        return;
+      }
+      if (pressInEditor) {
+        if (!this.isOverEditor(event.row - 1)) return;
+        void this.pasteFromClipboard();
+        return;
+      }
     }
   }
 
@@ -389,6 +413,46 @@ export class SideChatOverlay implements Component, Focusable {
       this.options.tui.requestRender();
     }, COPIED_STATUS_CLEAR_MS);
     return true;
+  }
+
+  /**
+   * Right-click paste (issue #7, D4): read plain text from the system
+   * clipboard via the injected platform-channel matrix (clipboard-read.ts,
+   * D3 — never throws, null when every channel fails), then route the text
+   * through the Editor's built-in paste entry (bracketed paste), so
+   * normalization (\r→\n, \t→4 spaces), large-paste collapse to a
+   * `[paste #N …]` marker and the atomic undo snapshot all come from the
+   * Editor itself — identical to a native terminal paste. On read failure
+   * the editor is left untouched and a transient hint is shown.
+   */
+  private async pasteFromClipboard(): Promise<void> {
+    let text: string | null;
+    try {
+      text = await readClipboardTextFromSystem();
+    } catch {
+      text = null;
+    }
+    if (!text) {
+      this.messages.setToolStatus(PASTE_FAILED_STATUS);
+      this.options.tui.requestRender();
+      if (this.pasteClearTimer) clearTimeout(this.pasteClearTimer);
+      this.pasteClearTimer = setTimeout(() => {
+        this.messages.clearToolStatusIf(PASTE_FAILED_STATUS);
+        this.options.tui.requestRender();
+      }, PASTE_STATUS_CLEAR_MS);
+      return;
+    }
+    // Bracketed paste is the only paste entry the Editor exposes (handlePaste
+    // is private); the same sequences a native terminal paste produces.
+    this.editor.handleInput(`\x1b[200~${text}\x1b[201~`);
+    this.options.tui.requestRender();
+  }
+
+  /** True when a screen row falls inside the input editor widget band. */
+  private isOverEditor(row: number): boolean {
+    const g = this.geometry;
+    if (!g) return false;
+    return row >= g.editorTopRow && row < g.editorTopRow + g.editorHeight;
   }
 
   /** Map 1-based screen coords to a chat cell position, or null off the chat area. */
@@ -857,6 +921,7 @@ export class SideChatOverlay implements Component, Focusable {
       : this.messages.render(innerWidth);
     for (let i = msgLines.length; i < maxLines; i++) msgLines.push("");
 
+    const editorLines = this.editor.render(innerWidth);
     const lines = renderSideChatFrame({
       width,
       theme,
@@ -864,13 +929,14 @@ export class SideChatOverlay implements Component, Focusable {
       headerLeft: left,
       headerRight: status,
       msgLines,
-      editorLines: this.editor.render(innerWidth),
+      editorLines,
       hints: hintLines,
     });
     this.lastRenderHeight = lines.length;
     this.geometry = computeChatGeometry(
       this.options.tui.terminal.columns,
       msgLines.length,
+      editorLines.length,
     );
     return lines;
   }
@@ -1090,6 +1156,10 @@ export class SideChatOverlay implements Component, Focusable {
       clearTimeout(this.copyClearTimer);
       this.copyClearTimer = null;
     }
+    if (this.pasteClearTimer) {
+      clearTimeout(this.pasteClearTimer);
+      this.pasteClearTimer = null;
+    }
     const messages = [...this.agent.state.messages];
     this.agent.abort();
     this.options.onClose(action, messages);
@@ -1118,6 +1188,7 @@ function parsePercent(value: string, reference: number): number {
 function computeChatGeometry(
   termCols: number,
   msgHeight: number,
+  editorHeight: number,
 ): ChatGeometry {
   const availWidth = Math.max(
     1,
@@ -1129,11 +1200,16 @@ function computeChatGeometry(
   );
   const leftCol =
     SIDE_CHAT_OVERLAY_MARGIN_LEFT + Math.floor((availWidth - width) / 2);
+  const msgTopRow = SIDE_CHAT_OVERLAY_MARGIN_TOP + 3;
   return {
-    msgTopRow: SIDE_CHAT_OVERLAY_MARGIN_TOP + 3,
+    msgTopRow,
     contentCol: leftCol + 2,
     innerWidth: width - 4,
     msgHeight,
+    // Separator after the messages sits at msgTopRow + msgHeight; the
+    // input editor widget band starts on the next row.
+    editorTopRow: msgTopRow + msgHeight + 1,
+    editorHeight,
   };
 }
 
