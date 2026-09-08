@@ -18,16 +18,19 @@ import {
   type SessionEntry,
   type Theme,
   type ThemeColor,
+  type ScopedModel,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import {
   Editor,
   Key,
   matchesKey,
+  SelectList,
   truncateToWidth,
   visibleWidth,
   type Component,
   type Focusable,
+  type SelectItem,
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { FileActivityTracker } from "./file-activity-tracker.ts";
@@ -49,6 +52,12 @@ import {
   SideChatMessages,
   type CellPos,
 } from "./side-chat-messages.ts";
+import {
+  buildModelChoices,
+  clampThinkingLevelForModel,
+  modelKey,
+  type ModelChoice,
+} from "./model-switch.ts";
 import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 
@@ -70,6 +79,8 @@ interface SideChatOverlayOptions {
   forkContext: ForkContext;
   tracker: FileActivityTracker;
   modelRegistry: ModelRegistry;
+  /** Models scoped to this session (--models / enabledModels); empty when unscoped. */
+  scopedModels: readonly ScopedModel[];
   sessionManager: SessionView;
   /** Prompt texts resolved from config.json `promptPack` (fresh per fork). */
   promptPack: PromptPack;
@@ -190,6 +201,10 @@ export class SideChatOverlay implements Component, Focusable {
   private pendingReminder: string | null = null;
   /** When true, the turn is aborted right after the escalated reminder is injected. */
   private abortAfterInject = false;
+  /** Open Alt+M model picker modal, or null when closed (modal replaces the chat area). */
+  private modelPicker: SelectList | null = null;
+  /** Choices backing the open picker (index-aligned with its SelectItems). */
+  private modelPickerChoices: ModelChoice[] = [];
 
   /**
    * Chat area height (message lines): 2.5x the original (~0.35 * rows - 10),
@@ -249,6 +264,8 @@ export class SideChatOverlay implements Component, Focusable {
    * against the geometry of the last render.
    */
   handleMouseEvent(event: SgrMouseEvent): void {
+    // Modal model picker: pointer events are ignored until it closes.
+    if (this.modelPicker) return;
     if (isWheelEvent(event)) {
       this.scrollByLines(wheelDirection(event) * WHEEL_SCROLL_LINES);
       return;
@@ -795,8 +812,19 @@ export class SideChatOverlay implements Component, Focusable {
     const scrollMark = this.messages.isAtBottom()
       ? ""
       : theme.fg("warning", ` [↑${this.messages.getScrollOffset()}]`);
+    // Header status shows the fork's current model (D10), mirroring the main
+    // footer format: thinking level shown only when the model supports it.
+    const model = this.agent.state.model;
+    const modelStatus = model
+      ? model.reasoning
+        ? this.agent.state.thinkingLevel === "off"
+          ? `[Model: ${model.id} • thinking off]`
+          : `[Model: ${model.id} • ${this.agent.state.thinkingLevel}]`
+        : `[Model: ${model.id}]`
+      : "[Model: ?]";
     const status =
       theme.fg("dim", `[Main: ${mainLabel}] `) +
+      theme.fg("dim", modelStatus + " ") +
       theme.fg(modeColor, `[${modeLabel}]`) +
       scrollMark;
     const stream = this.isStreaming ? theme.fg("warning", " ●") : "";
@@ -816,13 +844,17 @@ export class SideChatOverlay implements Component, Focusable {
     // wide terminals, so the layout (and the message-area height) is stable
     // everywhere. Rows longer than the frame are truncated with "…" by
     // renderSideChatFrame; one message row is traded for the second hint row.
-    const hintLines = buildSideChatHintLines({ scrollHint, escHint, modeHint });
+    const hintLines = this.modelPicker
+      ? buildSideChatModelPickerHints()
+      : buildSideChatHintLines({ scrollHint, escHint, modeHint });
     const maxLines = Math.max(
       3,
       this.computeChatHeight() - (hintLines.length - 1),
     );
     this.messages.setMaxVisibleLines(maxLines);
-    const msgLines = this.messages.render(innerWidth);
+    const msgLines = this.modelPicker
+      ? this.renderModelPicker(innerWidth, maxLines)
+      : this.messages.render(innerWidth);
     for (let i = msgLines.length; i < maxLines; i++) msgLines.push("");
 
     const lines = renderSideChatFrame({
@@ -844,16 +876,25 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
   handleInput(data: string): void {
+    // Backgrounding (Alt+W) while the picker is open cancels the modal first.
+    if (matchesKey(data, SIDE_CHAT_SHORTCUT)) {
+      this.closeModelPicker();
+      this.options.onBackground();
+      return;
+    }
+    // Open modal picker: route everything to the list (↑/↓ move, Enter
+    // confirms, Esc/Ctrl+C cancels) until it closes.
+    if (this.modelPicker) {
+      this.modelPicker.handleInput(data);
+      this.options.tui.requestRender();
+      return;
+    }
     if (matchesKey(data, Key.escape)) {
       if (this.isStreaming) {
         this.agent.abort();
       } else {
         this.dispose();
       }
-      return;
-    }
-    if (matchesKey(data, SIDE_CHAT_SHORTCUT)) {
-      this.options.onBackground();
       return;
     }
     if (matchesKey(data, Key.alt("r"))) {
@@ -866,6 +907,10 @@ export class SideChatOverlay implements Component, Focusable {
     }
     if (matchesKey(data, Key.alt("e"))) {
       this.exportChatHistory();
+      return;
+    }
+    if (matchesKey(data, Key.alt("m"))) {
+      this.openModelPicker();
       return;
     }
     if (
@@ -907,6 +952,106 @@ export class SideChatOverlay implements Component, Focusable {
     }
     this.editor.handleInput(data);
     this.options.tui.requestRender();
+  }
+
+  /**
+   * Alt+M: open the fork model picker as a modal inside the overlay (D7).
+   * The list shows scoped + authenticated models, falling back to the
+   * available catalogue (D6). Rejected while streaming: swapping the model
+   * mid-turn would corrupt the in-flight request.
+   */
+  private openModelPicker(): void {
+    if (this.modelPicker) return;
+    if (this.isStreaming) {
+      this.messages.setToolStatus("Model switch unavailable while streaming");
+      this.options.tui.requestRender();
+      return;
+    }
+    const { modelRegistry, scopedModels } = this.options;
+    const choices = buildModelChoices(
+      scopedModels,
+      modelRegistry.getAvailable?.() ?? [],
+      (model) => modelRegistry.hasConfiguredAuth?.(model) ?? false,
+    );
+    if (choices.length === 0) {
+      this.messages.setToolStatus("No authenticated models available");
+      this.options.tui.requestRender();
+      return;
+    }
+    const items: SelectItem[] = choices.map((choice) => ({
+      value: modelKey(choice.model),
+      label: choice.model.id,
+      description:
+        modelRegistry.getProviderDisplayName?.(choice.model.provider) ??
+        choice.model.provider,
+    }));
+    this.modelPickerChoices = choices;
+    const list = new SelectList(
+      items,
+      Math.min(items.length, 12),
+      getSelectListTheme(),
+    );
+    // Preselect the current fork model when it is on the list.
+    const currentIndex = choices.findIndex(
+      (c) => modelKey(c.model) === modelKey(this.agent.state.model),
+    );
+    if (currentIndex >= 0) list.setSelectedIndex(currentIndex);
+    list.onSelect = (item) => this.applyModelChoice(item);
+    list.onCancel = () => this.closeModelPicker();
+    this.modelPicker = list;
+    this.options.tui.requestRender();
+  }
+
+  /**
+   * Confirm: swap the fork agent's runtime model (next turn uses it —
+   * `agent.state.model` is re-read per turn, no rebuild needed, D5) and
+   * re-clamp the thinking level for the new model's capabilities. Fork-local
+   * only (ADR 0002): the main session's model is never touched.
+   */
+  private applyModelChoice(item: SelectItem): void {
+    const choice = this.modelPickerChoices.find(
+      (c) => modelKey(c.model) === item.value,
+    );
+    this.closeModelPicker();
+    if (!choice) return;
+    const model = choice.model;
+    // Explicit scoped thinking level ("model:high") overrides; otherwise keep
+    // the current level and clamp it — non-reasoning models clamp to "off"
+    // (pi maps "off" to no reasoning request).
+    const desired = choice.thinkingLevel ?? this.agent.state.thinkingLevel;
+    this.agent.state.model = model;
+    this.agent.state.thinkingLevel = clampThinkingLevelForModel(
+      model,
+      desired,
+    );
+    this.messages.setToolStatus(
+      `✓ Model: ${model.id}${
+        model.reasoning ? ` · ${this.agent.state.thinkingLevel}` : ""
+      }`
+    );
+    this.options.tui.requestRender();
+  }
+
+  private closeModelPicker(): void {
+    this.modelPicker = null;
+    this.modelPickerChoices = [];
+    this.options.tui.requestRender();
+  }
+
+  /**
+   * Render the open picker inside the frame: a one-line title + the list
+   * rows, padded/truncated to exactly `maxLines` so the frame geometry stays
+   * stable (mouse hit-testing and the hint bar depend on it).
+   */
+  private renderModelPicker(width: number, maxLines: number): string[] {
+    const list = this.modelPicker;
+    if (!list) return [];
+    const lines = [
+      this.options.theme.fg("accent", "Select model (↑/↓ · Enter · Esc)"),
+    ];
+    lines.push(...list.render(width));
+    while (lines.length < maxLines) lines.push("");
+    return lines.slice(0, maxLines);
   }
 
   /**
@@ -1064,6 +1209,9 @@ function frameLine(
   );
 }
 
+/** Alt-actions hint row, shared by the normal and model-picker hint bars. */
+const ALT_ACTION_HINTS = `A+w bg · A+r fork · A+n new · A+e export · A+m model`;
+
 /**
  * Build the fixed two-row key-hint bar. Row 1: scrolling, copy, mode toggle,
  * Esc and send; row 2: the Alt-actions (Alt abbreviated as A, A+w = Alt+W).
@@ -1077,6 +1225,18 @@ export function buildSideChatHintLines(options: {
 }): string[] {
   const { scrollHint, escHint, modeHint } = options;
   const primary = `${scrollHint} · C+c copy · ${modeHint} · ${escHint} · Enter send`;
-  const secondary = `A+w bg · A+r fork · A+n new · A+e export`;
+  const secondary = ALT_ACTION_HINTS;
   return [primary, secondary];
+}
+
+/**
+ * Hint bar while the Alt+M model picker modal is open: row 1 switches to
+ * the picker keys, row 2 keeps the Alt-actions (still two rows, so the
+ * message-area height stays stable).
+ */
+export function buildSideChatModelPickerHints(): string[] {
+  return [
+    "↑/↓ select · Enter confirm · Esc cancel",
+    ALT_ACTION_HINTS,
+  ];
 }

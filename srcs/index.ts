@@ -245,6 +245,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
             forkContext,
             tracker,
             modelRegistry: ctx.modelRegistry,
+            scopedModels: ctx.scopedModels,
             sessionManager: ctx.sessionManager,
             promptPack,
             readOnlyExtensionAllowlist: config.readOnlyExtensionAllowlist,

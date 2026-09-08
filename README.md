@@ -65,6 +65,7 @@ Press `Esc` to close it. Reopen with `/btw` or `Alt+W` to continue where you lef
 | `Alt+R` | Re-fork from the latest main context |
 | `Alt+N` | Start an empty conversation |
 | `Alt+E` | Export the transcript to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
+| `Alt+M` | Open the fork model picker (scoped + authenticated models; `↑/↓` select, `Enter` confirm, `Esc` cancel) |
 
 In Read-only Mode (default), the read-only lane is **enforced**: attempting an out-of-lane tool call is hard-blocked with a prompt injection; a second violation escalates the wording and aborts the turn (a `🚧 lane blocked` status line). Executed-but-failed read-only calls are re-grounded by an `afterToolCall` note. Edit mode (`Ctrl+T`) is unaffected.
 
@@ -84,6 +85,7 @@ What changed since I opened this side chat?
 **Mouse select + hotkey copy** — drag to select chat text (inverse-video highlight); double-click selects the whole rendered line. Copying is hotkey-only: `Ctrl+C` / `Ctrl+Shift+C` copies the retained selection through the native clipboard cascade (`wl-copy`/`xclip`, OSC 52 fallback); the selection stays highlighted so repeated presses re-copy. Dragging never touches the clipboard, so mouse interaction stays off the event loop. Mouse reporting follows overlay *visibility* — backgrounding the chat releases the terminal's native selection.
 
 **Transcript export** — `Alt+E` dumps the btw history (forked context, framing block, conversation, in-flight stream) to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` as a markdown diagnostic artifact, useful for debugging feature work.
+**Fork model switching** — `Alt+M` opens a model picker inside the overlay (`↑/↓` move, `Enter` confirm, `Esc` cancel). It lists the session's scoped models first (`--models` / `enabledModels`), falling back to the available catalogue, and only shows models with configured auth. Confirming swaps the fork agent's runtime model — the next turn uses it without rebuilding the fork — and clamps the thinking level to the new model's capabilities (no-reasoning models go to `off`). The choice is fork-local (ADR 0002): the main session's model is never touched. It survives backgrounding (`Alt+W`) and resets on `Alt+R`/`Alt+N`/`Esc` close. The header shows the current fork model; opening is rejected while streaming.
 
 ## Shortcuts
 
@@ -95,6 +97,7 @@ What changed since I opened this side chat?
 | `Alt+R` | Re-fork from latest main context |
 | `Alt+N` | Start empty conversation |
 | `Alt+E` | Export the btw chat history to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
+| `Alt+M` | Open the fork model picker (`↑/↓` select, `Enter` confirm, `Esc` cancel) |
 | `Ctrl+T` | Toggle read-only / edit mode |
 | `PgUp` / `PgDn` | Scroll history by a page |
 | `Shift+↑` / `Shift+↓` | Scroll by a few lines |
@@ -188,6 +191,7 @@ Structure:
 │   ├── side-chat-overlay.ts  # TUI overlay, agent lifecycle, lane enforcement, mouse routing
 │   ├── side-chat-messages.ts # message rendering, wrapping, selection, scrolling
 │   ├── side-chat-mouse.ts    # minimal SGR mouse parsing
+│   ├── model-switch.ts       # Alt+M fork model picker: list building + thinking clamp
 │   ├── side-chat-export.ts   # Alt+E transcript export
 │   ├── tool-wrapper.ts       # write-path overlap warnings
 │   └── file-activity-tracker.ts

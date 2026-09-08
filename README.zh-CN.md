@@ -65,6 +65,7 @@ pi install npm:@yceachan/pi-better-btw
 | `Alt+R` | 从最新主线上下文重新 fork |
 | `Alt+N` | 开始空白对话 |
 | `Alt+E` | 导出对话记录到 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
+| `Alt+M` | 打开 fork 模型选择器（scoped + 已认证模型；`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
 
 在Readonly Mode(default),只读车道是**强制的**：越权调用工具会被硬阻断并注入prompt；第二次违规会升级措辞并中止该轮，提示（`🚧 lane blocked` 状态行）。已执行但失败的只读调用会被 `afterToolCall` 备注再次归位。编辑模式（`Ctrl+T`）不受影响。
 
@@ -85,6 +86,8 @@ What changed since I opened this side chat?
 
 **对话导出** —— `Alt+E` 把 btw 历史（fork 上下文、framing 块、对话、流式中内容）导出为 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` 的 markdown 诊断产物，便于调试功能开发。
 
+**Fork 模型切换** —— `Alt+M` 在浮层内打开模型选择器（`↑/↓` 移动，`Enter` 确认，`Esc` 取消）。列表优先展示会话作用域模型（`--models` / `enabledModels`），为空时回退可用模型目录，且只显示已配置认证的模型。确认后直接替换 fork agent 的运行时模型——下一 turn 生效，无需重建 fork——并按新模型能力钳制 thinking level（无 reasoning 的模型钳制为 `off`）。选择为 fork 局部状态（ADR 0002）：主会话模型不受影响。后台化（`Alt+W`）保留选择；`Alt+R` / `Alt+N` / `Esc` 关闭后随实例重置。头部显示当前 fork 模型；流式期间拒绝打开。
+
 ## 快捷键
 
 | 按键 | 作用 |
@@ -95,6 +98,7 @@ What changed since I opened this side chat?
 | `Alt+R` | 从最新主线上下文重新 fork |
 | `Alt+N` | 开始空白对话 |
 | `Alt+E` | 导出 btw 对话历史到 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
+| `Alt+M` | 打开 fork 模型选择器（`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
 | `Ctrl+T` | 切换只读 / 编辑模式 |
 | `PgUp` / `PgDn` | 整页滚动历史 |
 | `Shift+↑` / `Shift+↓` | 按行滚动 |
