@@ -36,8 +36,8 @@ const { copiedTexts, setCopyImplementation, resetCopyImplementation } =
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
 // Overlay harness: the constructor is passed in so the helper stays free of
 // a static overlay import (mock.module ordering is controlled here).
-const makeOverlay = (messages?: any[]) =>
-  sharedMakeOverlay(SideChatOverlay, messages);
+const makeOverlay = (messages?: any[], overrides: Record<string, unknown> = {}) =>
+  sharedMakeOverlay(SideChatOverlay, messages, overrides);
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 describe("side-chat-mouse.ts", () => {
@@ -481,5 +481,20 @@ describe("side-chat-overlay.ts", () => {
     overlay.handleMouseEvent({ button: 64, col: 20, row: 5, isRelease: false });
     expect(M.getScrollOffset()).toBeGreaterThanOrEqual(before);
     expect(copiedTexts().length).toBe(0);
+  });
+  test("rightClickCopyPaste=false: right-click never copies (D11)", async () => {
+    const overlay = makeOverlay(undefined, {
+      features: { rightClickCopyPaste: false, modelSwitch: true, retry: true },
+    });
+    const M: any = (overlay as any).messages;
+    M.setSelection({ line: 0, col: 7 }, { line: 0, col: 12 });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts().length).toBe(0);
+    // Ctrl+C hotkey copy is unaffected by the right-click switch.
+    overlay.handleInput("\x03");
+    await tick();
+    expect(copiedTexts()).toEqual(["hello"]);
   });
 });

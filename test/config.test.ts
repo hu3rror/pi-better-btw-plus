@@ -375,3 +375,108 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
     }
   });
 });
+
+/**
+ * Feature switches (D11): per-leaf-key merge, higher layer wins, keys no
+ * layer defines keep their default (true). A layer can disable one behavior
+ * (`"retry": false`) without re-declaring the others.
+ */
+describe("config.ts features (D11)", () => {
+  test("no features anywhere: all three default to true", () => {
+    const tree = makeTree({});
+    try {
+      expect(tree.load().features).toEqual({
+        rightClickCopyPaste: true,
+        modelSwitch: true,
+        retry: true,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("bundle defaults are read and preserved", () => {
+    const tree = makeTree({
+      bundle: {
+        features: {
+          rightClickCopyPaste: true,
+          modelSwitch: true,
+          retry: true,
+        },
+      },
+    });
+    try {
+      expect(tree.load().features).toEqual({
+        rightClickCopyPaste: true,
+        modelSwitch: true,
+        retry: true,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("user layer disables one switch, the others keep bundle defaults", () => {
+    const tree = makeTree({
+      bundle: { features: { modelSwitch: true, retry: true } },
+      user: { features: { rightClickCopyPaste: false } },
+    });
+    try {
+      expect(tree.load().features).toEqual({
+        rightClickCopyPaste: false,
+        modelSwitch: true,
+        retry: true,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("project layer overrides user per key (higher layer wins)", () => {
+    const tree = makeTree({
+      user: { features: { retry: false } },
+      project: { features: { retry: true, modelSwitch: false } },
+    });
+    try {
+      expect(tree.load().features).toEqual({
+        rightClickCopyPaste: true,
+        modelSwitch: false,
+        retry: true,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("non-boolean switch values are ignored (fall through to defaults)", () => {
+    const tree = makeTree({
+      user: {
+        features: { retry: "disabled", modelSwitch: false, rightClickCopyPaste: 1 }
+      },
+    });
+    try {
+      expect(tree.load().features).toEqual({
+        rightClickCopyPaste: true,
+        modelSwitch: false,
+        retry: true,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("non-object features block contributes nothing", () => {
+    const tree = makeTree({
+      user: { features: "all-on" },
+    });
+    try {
+      expect(tree.load().features).toEqual({
+        rightClickCopyPaste: true,
+        modelSwitch: true,
+        retry: true,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+});

@@ -61,6 +61,7 @@ export function makeOverlay(
     },
     readOnlyExtensionAllowlist: [],
     retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
+    features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
     onOverlapWarning: async () => true,
     onBackground: () => {},
     onExport: () => {},

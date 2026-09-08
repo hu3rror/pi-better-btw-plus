@@ -24,8 +24,8 @@ const { setClipboardReadResult, setClipboardReadEmpty } = await import(
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
 // Overlay harness: the constructor is passed in so the helper stays free of
 // a static overlay import (mock.module ordering is controlled here).
-const makeOverlay = (messages?: any[]) =>
-  sharedMakeOverlay(SideChatOverlay, messages);
+const makeOverlay = (messages?: any[], overrides: Record<string, unknown> = {}) =>
+  sharedMakeOverlay(SideChatOverlay, messages, overrides);
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -217,5 +217,14 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
     await tick();
     expect(copiedTexts().length).toBe(0);
+  });
+  test("rightClickCopyPaste=false: right-click over the editor never pastes (D11)", async () => {
+    const overlay = makeOverlay(undefined, {
+      features: { rightClickCopyPaste: false, modelSwitch: true, retry: true },
+    });
+    setClipboardReadResult("hello");
+    rightClick(overlay, editorRow(overlay));
+    await tick();
+    expect((overlay as any).editor.getText()).toBe("");
   });
 });

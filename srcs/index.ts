@@ -255,6 +255,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
             sessionManager: ctx.sessionManager,
             promptPack,
             readOnlyExtensionAllowlist: config.readOnlyExtensionAllowlist,
+            features: config.features,
             retryPolicy,
             onOverlapWarning: (path) => showOverlapWarning(ctx.ui, path),
             onBackground: () => {

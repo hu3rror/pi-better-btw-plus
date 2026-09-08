@@ -84,7 +84,9 @@ What changed since I opened this side chat?
 
 **滚动历史** —— `PgUp`/`PgDn` 整页滚动，`Shift+↑`/`Shift+↓` 按行滚动，鼠标指针悬停于聊天区域时滚轮滚动。离开最新消息时，标题栏出现 `[↑N]` 指示器，提示栏切换为 `↑N · PgDn/Wheel ↓`。流式期间视口跟随底部；一旦你向上滚动就冻结内容锚定（新行增长滚动偏移而不是滑动可见内容），回到底部或新消息后恢复跟随。
 
-**鼠标选择 + 快捷键复制** —— 拖拽选择聊天文本（反色高亮）；双击选择整行。复制仅限快捷键：`Ctrl+C` / `Ctrl+Shift+C` 通过原生剪贴板级联（`wl-copy`/`xclip`，OSC 52 兜底）复制保留的选择；选择保持高亮，可重复按复制。拖拽不碰剪贴板，鼠标交互不阻塞事件循环。鼠标上报跟随浮层*可见性*——后台化时释放终端原生选择。
+**鼠标选择 + 右键复制** —— 拖拽选择聊天文本（反色高亮）；双击选择整行。用 `Ctrl+C` / `Ctrl+Shift+C` **或在聊天区右键**复制保留的选择（延续 Windows Terminal 肌肉记忆：右键在松开时触发、需要有活跃选区、且保持高亮可重复右键再复制）。复制走原生剪贴板级联（`wl-copy`/`xclip`，OSC 52 兜底）；拖拽不碰剪贴板，鼠标交互不阻塞事件循环。鼠标上报跟随浮层*可见性*——后台化时释放终端原生选择。
+
+**输入框右键粘贴** —— 在编辑器内右键把系统剪贴板文本粘贴到光标处，走编辑器内置粘贴入口：换行/制表符归一化（`\r`→`\n`、`\t`→4 空格），大段粘贴（>10 行或 >1000 字符）折叠为 `[paste #N +X lines]` / `[paste #N X chars]` 标记、提交时展开为完整文本，且粘贴是单个撤销步。剪贴板读取失败（平台通道与 OSC 52 兜底均不可用）或为空时显示一行提示，编辑器保持原样。
 
 **对话导出** —— `Alt+E` 把 btw 历史（fork 上下文、framing 块、对话、流式中内容）导出为 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` 的 markdown 诊断产物，便于调试功能开发。
 
@@ -107,8 +109,9 @@ What changed since I opened this side chat?
 | 鼠标滚轮 | 指针位于聊天区域时滚动 |
 | 鼠标拖拽 | 选择聊天文本（反色高亮）；松开不自动复制 |
 | 双击 | 选择整行 |
-| `Ctrl+C` / `Ctrl+Shift+C` | 复制当前鼠标选择（仅快捷键；选择保留到下次点击，可重复复制） |
-
+| `Ctrl+C` / `Ctrl+Shift+C` | 复制当前鼠标选择（选择保留到下次点击，可重复复制） |
+| 鼠标右键（聊天区） | 复制保留的鼠标选择（松开时触发，保持高亮） |
+| 鼠标右键（输入框） | 把系统剪贴板粘贴到光标处（编辑器归一化 + 大段 `[paste #N …]` 标记） |
 ## 命令参考
 
 ### `/btw`
@@ -143,13 +146,20 @@ pi-better-btw 从三个位置按优先级递增读取 `config.json` —— 每�
 - `readOnlyExtensionAllowlist` —— 只读车道允许的扩展工具名（车道始终包含内置只读工具 `read`/`grep`/`find`/`ls` 和 `peek_main`）。各层按 bundle → user → project 顺序**取并集**（去重，先到先得）：高层只增不减。
 - `readOnlyExtensionAllowlistExclude` —— 从最终列表中移除的工具名，例如用于去掉某个内置默认。
 - `promptPack` —— 提示包清单（见下）；按键合并，高层优先。相对路径按所在层目录解析，用户级 manifest 可放在用户配置旁边；绝对路径亦可。
+- `features` —— 按功能开关，每项默认 `true`；层只覆盖它定义的键（按键高层优先）。设为 `false` 即可禁用某个行为而不影响其它：
+
+  | 开关 | 为 `false` 时的行为 |
+  | ---- | ---- |
+  | `rightClickCopyPaste` | 右键复制（聊天区）/ 粘贴（输入框）失效——快捷键不受影响 |
+  | `modelSwitch` | `Alt+M` 无反应 |
+  | `retry` | fork 每轮只跑一次尝试、零退避，即使 pi 的 `settings.retry` 开启 |
 
 示例（用户或项目层）：
 
 ```json
 {
   "readOnlyExtensionAllowlist": ["pi-vision-helper", "lens_diagnostics"],
-  "readOnlyExtensionAllowlistExclude": ["web_search"]
+  "features": { "retry": false }
 }
 ```
 
@@ -176,8 +186,7 @@ btw 上下文保留主线的 system prompt 于 system 槽位，并逐字注入 f
 
 主线 agent 的工具执行事件被跟踪以维护已写文件路径集合（`srcs/file-activity-tracker.ts`）；写类工具被包装以在触碰这些路径前警告（`srcs/tool-wrapper.ts`）。
 
-旁路会话打开期间启用 xterm 鼠标上报（SGR，按键 + 移动跟踪），浮层事件路由到聊天区：滚轮滚动，左键拖拽选择。复制仅快捷键（见上）。所有鼠标序列都被吞掉，绝不泄漏到编辑器；上报跟随浮层可见性。
-
+旁路会话打开期间启用 xterm 鼠标上报（SGR，按键 + 移动跟踪），浮层事件路由到聊天区：滚轮滚动，左键拖拽选择，右键复制选区 / 在输入框粘贴（见上）。所有鼠标序列都被吞掉，绝不泄漏到编辑器；上报跟随浮层可见性。
 `peek_main` 按需读取当前会话分支并返回紧凑摘要。
 
 ## 开发

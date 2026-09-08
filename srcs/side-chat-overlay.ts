@@ -64,6 +64,7 @@ import {
 } from "./model-switch.ts";
 import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
+import type { SideChatFeatures } from "./config.ts";
 import {
   classifyRetryable,
   runWithRetry,
@@ -99,6 +100,8 @@ interface SideChatOverlayOptions {
   readOnlyExtensionAllowlist: string[];
   /** `settings.retry` budget/backoff read from pi's settings files (D8). */
   retryPolicy: RetryPolicy;
+  /** Per-feature kill switches resolved from the layered config (D11). */
+  features: SideChatFeatures;
   onOverlapWarning: (path: string) => Promise<boolean>;
   onBackground: () => void;
   onClose: (
@@ -373,10 +376,14 @@ export class SideChatOverlay implements Component, Focusable {
     }
     if (isRightPress(event)) {
       // Track where the right press landed; the actual action fires on
-      // release, so a press-then-move-out-then-release does nothing.
-      this.rightPressInChat =
-        this.screenToChat(event.row - 1, event.col - 1) !== null;
-      this.rightPressInEditor = this.isOverEditor(event.row - 1);
+      // release, so a press-then-move-out-then-release does nothing. The
+      // feature switch (D11) disables both right-click branches entirely —
+      // an unrecorded press leaves the release branch a no-op.
+      if (this.options.features.rightClickCopyPaste) {
+        this.rightPressInChat =
+          this.screenToChat(event.row - 1, event.col - 1) !== null;
+        this.rightPressInEditor = this.isOverEditor(event.row - 1);
+      }
       return;
     }
     if (isRightRelease(event)) {
@@ -923,7 +930,14 @@ export class SideChatOverlay implements Component, Focusable {
             this.agent.state.model?.contextWindow ?? 0,
           ),
         onAttempt: (info) => this.showRetryStatus(info),
-        policy: this.options.retryPolicy,
+        // D11: the extension feature switch ANDs with pi's own
+        // `settings.retry.enabled` — either one off means a single attempt
+        // with zero backoff (runWithRetry's enabled=false path).
+        policy: {
+          ...this.options.retryPolicy,
+          enabled:
+            this.options.features.retry && this.options.retryPolicy.enabled,
+        },
       });
     } catch (e) {
       this.streamingContent = "";
@@ -1152,6 +1166,8 @@ export class SideChatOverlay implements Component, Focusable {
    */
   private openModelPicker(): void {
     if (this.modelPicker) return;
+    // Feature switch (D11): Alt+M is inert when model switching is off.
+    if (!this.options.features.modelSwitch) return;
     if (this.isStreaming) {
       this.messages.setToolStatus("Model switch unavailable while streaming");
       this.options.tui.requestRender();
@@ -1426,7 +1442,9 @@ export function buildSideChatHintLines(options: {
   modeHint: string;
 }): string[] {
   const { scrollHint, escHint, modeHint } = options;
-  const primary = `${scrollHint} · C+c copy · ${modeHint} · ${escHint} · Enter send`;
+  // Right-click semantics live next to the copy hint: chat-area right-click
+  // copies a retained selection, editor right-click pastes (D10).
+  const primary = `${scrollHint} · C+c copy · R-click copy/paste · ${modeHint} · ${escHint} · Enter send`;
   const secondary = ALT_ACTION_HINTS;
   return [primary, secondary];
 }

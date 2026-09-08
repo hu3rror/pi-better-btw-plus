@@ -103,6 +103,7 @@ function makeOverlay(overrides: any = {}): SideChatOverlayType {
       laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
     },
     readOnlyExtensionAllowlist: [],
+    features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
     onOverlapWarning: async () => true,
     onBackground: () => {},
     onExport: () => {},
@@ -353,6 +354,16 @@ describe("side-chat-overlay model picker", () => {
     expect(picker(overlay)).toBeNull();
     expect(backgrounded).toBe(true);
     // The fork model was not applied (cancel, not confirm).
+    expect(agentState(overlay).model.id).toBe("current-model");
+  });
+  test("modelSwitch=false: Alt+M is inert, the picker never opens (D11)", () => {
+    const overlay = makeOverlay({
+      features: { rightClickCopyPaste: true, modelSwitch: false, retry: true },
+      modelRegistry: makeRegistry(available, ["model-a"]),
+    });
+    overlay.handleInput(ALT_M);
+    expect(picker(overlay)).toBeNull();
+    // The fork keeps its current model.
     expect(agentState(overlay).model.id).toBe("current-model");
   });
 });

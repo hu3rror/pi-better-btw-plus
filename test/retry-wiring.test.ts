@@ -19,8 +19,11 @@ import {
 } from "./helpers/make-overlay.ts";
 
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
-const makeOverlay = (retryPolicy: RetryPolicy) =>
-  sharedMakeOverlay(SideChatOverlay, undefined, { retryPolicy });
+const makeOverlay = (retryPolicy: RetryPolicy, features?: Record<string, unknown>) =>
+  sharedMakeOverlay(SideChatOverlay, undefined, {
+    retryPolicy,
+    ...(features ? { features } : {}),
+  });
 
 // --- Scripted fake agent ----------------------------------------------------
 
@@ -280,4 +283,22 @@ describe("side-chat-overlay.ts retry wiring (#8)", () => {
     expect(lines).toContain("[Error]: rate limit reached");
   });
 
+  test("features.retry=false: single attempt, zero backoff, error surfaces (D11)", async () => {
+    const overlay = makeOverlay(
+      { enabled: true, maxRetries: 3, baseDelayMs: 100_000 },
+      { rightClickCopyPaste: true, modelSwitch: true, retry: false },
+    );
+    const fake = makeFakeAgent([{ kind: "fail", errorMessage: "overloaded" }]);
+    (overlay as any).agent = fake;
+    const statuses = captureStatus(overlay);
+
+    const started = Date.now();
+    await submitText(overlay, "hi");
+    expect(Date.now() - started).toBeLessThan(1000);
+
+    expect(fake.calls.map((c) => c.kind)).toEqual(["prompt"]);
+    expect(statuses.some((s) => s.includes("Retrying"))).toBe(false);
+    const lines = overlay.render(OVERLAY_TEST_WIDTH).join("\n");
+    expect(lines).toContain("[Error]: overloaded");
+  });
 });

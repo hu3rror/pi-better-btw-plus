@@ -82,7 +82,9 @@ What changed since I opened this side chat?
 
 **Scroll the history** — `PgUp`/`PgDn` scroll by a page, `Shift+↑`/`Shift+↓` by a few lines, and the mouse wheel scrolls when the pointer is over the chat. When scrolled away from the latest message, a `[↑N]` indicator appears in the header and the hint bar switches to `↑N · PgDn/Wheel ↓`. While streaming, the viewport follows the bottom until you scroll away, then freezes content-anchored (new lines grow the scroll offset instead of sliding the visible content); it resumes following once you're back at the bottom or a new message arrives.
 
-**Mouse select + hotkey copy** — drag to select chat text (inverse-video highlight); double-click selects the whole rendered line. Copying is hotkey-only: `Ctrl+C` / `Ctrl+Shift+C` copies the retained selection through the native clipboard cascade (`wl-copy`/`xclip`, OSC 52 fallback); the selection stays highlighted so repeated presses re-copy. Dragging never touches the clipboard, so mouse interaction stays off the event loop. Mouse reporting follows overlay *visibility* — backgrounding the chat releases the terminal's native selection.
+**Mouse select + right-click copy** — drag to select chat text (inverse-video highlight); double-click selects the whole rendered line. Copy the retained selection with `Ctrl+C` / `Ctrl+Shift+C` **or right-click on the chat area** (Windows Terminal muscle memory): the right-click fires on release, needs an active selection, and keeps the highlight so repeated right-clicks re-copy. Copies go through the native clipboard cascade (`wl-copy`/`xclip`, OSC 52 fallback); dragging never touches the clipboard, so mouse interaction stays off the event loop. Mouse reporting follows overlay *visibility* — backgrounding the chat releases the terminal's native selection.
+
+**Right-click paste in the input box** — right-click inside the editor pastes the system clipboard at the cursor through the editor's built-in paste entry: line endings/tabs are normalized (`\r`→`\n`, `\t`→4 spaces), large pastes (>10 lines or >1000 chars) collapse to a `[paste #N +X lines]` / `[paste #N X chars]` marker that expands back to full text on submit, and the paste is a single undo step. When the clipboard can't be read (platform channel + OSC 52 fallback both unavailable) or holds no text, a one-line hint appears and the editor is left untouched.
 
 **Transcript export** — `Alt+E` dumps the btw history (forked context, framing block, conversation, in-flight stream) to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` as a markdown diagnostic artifact, useful for debugging feature work.
 **Fork model switching** — `Alt+M` opens a model picker inside the overlay (`↑/↓` move, `Enter` confirm, `Esc` cancel). It lists the session's scoped models first (`--models` / `enabledModels`), falling back to the available catalogue, and only shows models with configured auth. Confirming swaps the fork agent's runtime model — the next turn uses it without rebuilding the fork — and clamps the thinking level to the new model's capabilities (no-reasoning models go to `off`). The choice is fork-local (ADR 0002): the main session's model is never touched. It survives backgrounding (`Alt+W`) and resets on `Alt+R`/`Alt+N`/`Esc` close. The header shows the current fork model; opening is rejected while streaming.
@@ -106,8 +108,9 @@ What changed since I opened this side chat?
 | Mouse wheel | Scroll when the pointer is over the chat |
 | Mouse drag | Select text in the chat area (inverse-video highlight); no copy on release |
 | Double-click | Select the whole rendered line |
-| `Ctrl+C` / `Ctrl+Shift+C` | Copy the active mouse selection (hotkey-only; the selection is kept until you click elsewhere, so repeated presses re-copy) |
-
+| `Ctrl+C` / `Ctrl+Shift+C` | Copy the active mouse selection (the selection is kept until you click elsewhere, so repeated presses re-copy) |
+| Mouse right-click (chat area) | Copy the retained mouse selection (fires on release, keeps the highlight) |
+| Mouse right-click (input editor) | Paste the system clipboard at the cursor (editor normalization + `[paste #N …]` markers for large pastes) |
 ## Command Reference
 
 ### `/btw`
@@ -142,13 +145,20 @@ Keys:
 - `readOnlyExtensionAllowlist` — extension tool names allowed in the read-only lane (the lane always includes the builtin read tools `read`/`grep`/`find`/`ls` and `peek_main`). Lists are **unioned** across layers in bundle → user → project order (deduped, first occurrence wins): a user/project layer adds tools, it never drops the defaults shipped below it.
 - `readOnlyExtensionAllowlistExclude` — tool names removed from the final list, e.g. to drop a bundled default.
 - `promptPack` — prompt-pack manifest (see below); merges per key with the higher layer winning. Relative paths resolve against the layer's own directory, so a user-level manifest can live next to the user config; absolute paths work too.
+- `features` — per-feature kill switches, each defaulting to `true`; a layer only overrides the keys it defines (higher layer wins per key). Set a switch to `false` to disable a behavior without touching the others:
+
+  | Switch | Behavior when `false` |
+  |--------|------------------------|
+  | `rightClickCopyPaste` | right-click copy (chat) / paste (editor) is inert — the hotkeys still work |
+  | `modelSwitch` | `Alt+M` does nothing |
+  | `retry` | fork turns run a single attempt with zero backoff, even if pi's `settings.retry` is enabled |
 
 Example (user or project layer):
 
 ```json
 {
   "readOnlyExtensionAllowlist": ["pi-vision-helper", "lens_diagnostics"],
-  "readOnlyExtensionAllowlistExclude": ["web_search"]
+  "features": { "retry": false }
 }
 ```
 
@@ -175,8 +185,7 @@ The btw context keeps the main lane's system prompt in the system slot and injec
 
 Main-agent tool execution events are tracked to maintain a set of written file paths (`srcs/file-activity-tracker.ts`); write-capable tools are wrapped to warn before touching those paths (`srcs/tool-wrapper.ts`).
 
-While the side chat is open, xterm mouse reporting (SGR, button + motion tracking) is enabled and overlay events are routed to the chat: the wheel scrolls it, and a left-button drag selects text. Copying is hotkey-only as described above. All mouse sequences are consumed so they never leak into the editor, and reporting follows overlay visibility.
-
+While the side chat is open, xterm mouse reporting (SGR, button + motion tracking) is enabled and overlay events are routed to the chat: the wheel scrolls it, a left-button drag selects text, and a right-click copies the selection / pastes into the editor as described above. All mouse sequences are consumed so they never leak into the editor, and reporting follows overlay visibility.
 `peek_main` reads the current session branch on demand and returns a compact summary.
 
 ## Development

@@ -27,9 +27,25 @@ import type { RetryPolicy } from "./retry.ts";
  * apply on the next open (same philosophy as the prompt pack).
  */
 
+/**
+ * Per-feature kill switches (D11). Each defaults to true; a layer only
+ * overrides the keys it defines, so a user can disable one behavior without
+ * touching the others (or the bundle defaults). Read-only here — the
+ * switches are resolved at every side-chat open, like the rest of the config.
+ */
+export interface SideChatFeatures {
+  /** Right-click copy (chat selection) / paste (editor). Default: true. */
+  rightClickCopyPaste: boolean;
+  /** Alt+M fork model picker. Default: true. */
+  modelSwitch: boolean;
+  /** Turn-level auto-retry of transient provider errors. Default: true. */
+  retry: boolean;
+}
+
 export interface SideChatConfig {
   readOnlyExtensionAllowlist: string[];
   promptPack: PromptPackManifest | undefined;
+  features: SideChatFeatures;
 }
 
 export interface LoadConfigOptions {
@@ -123,6 +139,8 @@ interface ConfigLayer {
   readOnlyExtensionAllowlist: string[] | undefined;
   readOnlyExtensionAllowlistExclude: string[] | undefined;
   promptPack: PromptPackManifest | undefined;
+  /** Feature switches this layer actually defines (undefined = falls through). */
+  features: Partial<SideChatFeatures> | undefined;
 }
 
 function parseStringArray(value: unknown): string[] | undefined {
@@ -131,6 +149,11 @@ function parseStringArray(value: unknown): string[] | undefined {
     (n): n is string => typeof n === "string" && n.length > 0,
   );
   return names.length > 0 ? names : undefined;
+}
+
+/** Boolean feature switch; non-boolean values are ignored (fall through). */
+function parseBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 /** Resolve a prompt-pack path against the layer's dir; non-strings stay undefined. */
@@ -168,6 +191,11 @@ function parseConfigLayer(raw: unknown, dir: string): ConfigLayer {
     raw && typeof raw === "object" && !Array.isArray(raw)
       ? (raw as Record<string, unknown>)
       : {};
+  const rawFeatures = rec.features;
+  const featureRec =
+    rawFeatures && typeof rawFeatures === "object" && !Array.isArray(rawFeatures)
+      ? (rawFeatures as Record<string, unknown>)
+      : undefined;
   return {
     readOnlyExtensionAllowlist: parseStringArray(
       rec.readOnlyExtensionAllowlist,
@@ -176,6 +204,13 @@ function parseConfigLayer(raw: unknown, dir: string): ConfigLayer {
       rec.readOnlyExtensionAllowlistExclude,
     ),
     promptPack: parsePromptPack(rec.promptPack, dir),
+    features: featureRec
+      ? {
+          rightClickCopyPaste: parseBoolean(featureRec.rightClickCopyPaste),
+          modelSwitch: parseBoolean(featureRec.modelSwitch),
+          retry: parseBoolean(featureRec.retry),
+        }
+      : undefined,
   };
 }
 
@@ -248,6 +283,33 @@ function mergePromptPacks(
   return defined ? merged : undefined;
 }
 
+/**
+ * Feature switches merge per leaf key, higher layer wins; keys no layer
+ * defines keep their default (true). A layer can disable one behavior
+ * (`"retry": false`) without re-declaring the others.
+ */
+const FEATURE_KEYS = [
+  "rightClickCopyPaste",
+  "modelSwitch",
+  "retry",
+] as const;
+function mergeFeatures(layers: ConfigLayer[]): SideChatFeatures {
+  const features: SideChatFeatures = {
+    rightClickCopyPaste: true,
+    modelSwitch: true,
+    retry: true,
+  };
+  for (const layer of layers) {
+    const layerFeatures = layer.features;
+    if (!layerFeatures) continue;
+    for (const key of FEATURE_KEYS) {
+      const value = layerFeatures[key];
+      if (value !== undefined) features[key] = value;
+    }
+  }
+  return features;
+}
+
 export function loadConfig(options: LoadConfigOptions): SideChatConfig {
   const layers: ConfigLayer[] = [];
   layers.push(
@@ -274,5 +336,6 @@ export function loadConfig(options: LoadConfigOptions): SideChatConfig {
   return {
     readOnlyExtensionAllowlist: mergeAllowlists(layers),
     promptPack: mergePromptPacks(layers),
+    features: mergeFeatures(layers),
   };
 }

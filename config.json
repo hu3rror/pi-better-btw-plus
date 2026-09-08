@@ -14,5 +14,10 @@
     "source_check",
     "fetch_content",
     "get_search_content"
-  ]
+  ],
+  "features": {
+    "rightClickCopyPaste": true,
+    "modelSwitch": true,
+    "retry": true
+  }
 }
