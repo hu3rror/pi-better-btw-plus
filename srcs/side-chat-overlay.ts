@@ -52,6 +52,7 @@ import {
 } from "./side-chat-mouse.ts";
 import { substituteTemplate, type PromptPack } from "./prompt-pack.ts";
 import {
+  isFramingMessage,
   markFramingMessage,
   SideChatMessages,
   type CellPos,
@@ -121,6 +122,17 @@ const SIDE_CHAT_OVERLAY_MARGIN_LEFT = 2;
 const SIDE_CHAT_OVERLAY_MARGIN_RIGHT = 2;
 /** Two quick presses within this window (same line) count as a double-click → select line. */
 const DOUBLE_CLICK_INTERVAL_MS = 500;
+
+/**
+ * True when a drag release ended within the double-click tolerance (same
+ * line within a couple of cells). Real terminals report motion even for
+ * 1-cell hand shake during a double-click, so a selection this small is a
+ * click, not a drag — it must not suppress the next press's double-click
+ * classification.
+ */
+function selectionWithinClickTolerance(a: CellPos, b: CellPos): boolean {
+  return Math.abs(a.line - b.line) <= 1 && Math.abs(a.col - b.col) <= 2;
+}
 /** Wheel scroll step in lines (matches the previous mouse handler). */
 const WHEEL_SCROLL_LINES = 3;
 /**
@@ -345,7 +357,6 @@ export class SideChatOverlay implements Component, Focusable {
     if (isLeftRelease(event)) {
       if (!this.mouseDragging) return;
       this.mouseDragging = false;
-      this.lastReleaseWasDrag = true;
       if (this.pendingDoubleClick) {
         // Double-click: select the whole rendered line (no auto-copy; the
         // hotkey copies it).
@@ -367,6 +378,12 @@ export class SideChatOverlay implements Component, Focusable {
         // selection stays highlighted so Ctrl+C copies it (hotkey-only copy).
         const anchor = this.messages.getSelectionAnchor() ?? this.mouseAnchor;
         this.messages.setSelection(anchor, pos);
+        // A selection that ends within the double-click tolerance is a click
+        // with hand shake, not a drag: real terminals report motion (button 32)
+        // even for 1-cell moves, so without this the tiniest movement while
+        // double-clicking marks the release as a drag and the second press is
+        // never classified as a double-click (bug: line-select never fires).
+        this.lastReleaseWasDrag = !selectionWithinClickTolerance(anchor, pos);
       } else {
         // Plain click without drag: no selection.
         this.messages.clearSelection();
@@ -873,6 +890,28 @@ export class SideChatOverlay implements Component, Focusable {
     renderStatus();
     this.retryCountdown = setInterval(renderStatus, 250);
   }
+
+  /**
+   * Re-substitute the framing block with the fork's CURRENT model (Alt+M may
+   * have switched `agent.state.model`, D5). The framing text is built once at
+   * open time with the main session's model; the message lives in the
+   * transcript (marked, never rendered as a bubble), so refreshing its content
+   * keeps the LLM's self-reported model honest without touching the request
+   * structure.
+   */
+  private refreshFramingModel(): void {
+    const modelId = this.agent.state.model?.id;
+    if (!modelId) return;
+    for (const message of this.agent.state.messages) {
+      if (isFramingMessage(message) && typeof message.content === "string") {
+        message.content = substituteTemplate(this.options.promptPack.framing, {
+          cwd: this.options.forkContext.cwd,
+          model: modelId,
+        });
+        return;
+      }
+    }
+  }
   private async handleSubmit(text: string) {
     const trimmed = text.trim();
     if (!trimmed || this.isStreaming || this.disposed) return;
@@ -881,6 +920,12 @@ export class SideChatOverlay implements Component, Focusable {
     this.laneViolations = 0;
     this.pendingReminder = null;
     this.abortAfterInject = false;
+
+    // Keep the framing block's `Model:` line in sync with the fork's current
+    // model (Alt+M, D5): the text is substituted once at open time with the
+    // main session's model, so without this refresh the agent self-reports the
+    // old model after a switch (bug #3).
+    this.refreshFramingModel();
 
     this.editor.setText("");
     this.isStreaming = true;

@@ -366,4 +366,37 @@ describe("side-chat-overlay model picker", () => {
     // The fork keeps its current model.
     expect(agentState(overlay).model.id).toBe("current-model");
   });
+  test("after a model switch, the next turn's framing names the new model (self-report)", async () => {
+    // Regression: the framing block carries `Model: {{model}}`, substituted at
+    // open time with the MAIN session's model. Alt+M switches the fork's
+    // runtime model but the framing text stayed stale, so asking the agent
+    // "what model are you" answered with the old one. Every turn re-substitutes
+    // the framing block with the current fork model.
+    const overlay = makeOverlay({
+      promptPack: {
+        framing: "Model: {{model}}",
+        focusAnchor: "",
+        laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
+      },
+      retryPolicy: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
+    });
+    // Switch the fork model the way Alt+M confirm does.
+    const st = agentState(overlay);
+    st.model = makeModel("glm-new", false);
+    // Fake agent so the turn never hits the network; keep the messages
+    // (framing included) and the switched model.
+    const realState = st;
+    (overlay as any).agent = {
+      prompt: async () => {},
+      continue: async () => {},
+      abort: () => {},
+      subscribe: () => {},
+      state: { ...realState, model: makeModel("glm-new", false) },
+    };
+    await (overlay as any).handleSubmit("hi");
+    const framing = (st.messages as any[]).find((m) =>
+      String(m.content ?? "").includes("Model:"),
+    );
+    expect(framing?.content).toContain("Model: glm-new");
+  });
 });

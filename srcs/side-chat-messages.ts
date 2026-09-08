@@ -41,8 +41,10 @@ export function markFramingMessage<T extends AgentMessage>(message: T): T {
   return message;
 }
 
-/** True for framing-block messages (marked at construction). */
-export function isFramingMessage(message: AgentMessage): boolean {
+/** True for framing-block messages (marked at construction); narrows to a string-content message. */
+export function isFramingMessage(
+  message: AgentMessage,
+): message is AgentMessage & { content: string } {
   return (message as AgentMessage & { [FRAMING_MARKER]?: boolean })[FRAMING_MARKER] === true;
 }
 
@@ -160,6 +162,11 @@ export class SideChatMessages implements Component {
   /** The current selection anchor (window coordinates), or null when no selection. */
   getSelectionAnchor(): CellPos | null {
     return this.selection?.anchor ?? null;
+  }
+
+  /** The current selection focus (window coordinates), or null when no selection. */
+  getSelectionFocus(): CellPos | null {
+    return this.selection?.focus ?? null;
   }
 
   /** True when a non-empty selection is active (highlights are rendered). */

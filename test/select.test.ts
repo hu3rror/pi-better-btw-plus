@@ -281,6 +281,23 @@ describe("side-chat-overlay.ts", () => {
     expect(copied[0].startsWith("[You]: hello world")).toBe(true);
   });
 
+  test("double-click survives a tiny motion between clicks (real-terminal hand shake)", async () => {
+    // Regression: real terminals report motion (button 32) even for a 1-cell
+    // move while the button is held. The drag path used to grow a real
+    // selection and the release kept `lastReleaseWasDrag = true`, so the
+    // second press was never classified as a double-click and line selection
+    // never fired. A release inside the double-click tolerance is a click.
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 19, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: true });
+    overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: true });
+    await tick();
+    expect(M.getSelectedText().startsWith("[You]: hello world")).toBe(true);
+  });
+
   test("drag beyond the viewport clamps to the last line", () => {
     const overlay = makeOverlay();
     overlay.handleMouseEvent({ button: 0, col: 14, row: 5, isRelease: false });
