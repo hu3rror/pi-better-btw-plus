@@ -1,31 +1,42 @@
 <p>
-  <img src="banner.png" alt="pi-better-btw" width="1100">
+  <img src="https://raw.githubusercontent.com/hu3rror/pi-better-btw-plus/main/banner.png" alt="pi-better-btw-plus" width="1100">
 </p>
 
-# @yceachan/pi-better-btw
+# pi-better-btw-plus
 
 **[English](README.md) | 简体中文**
 
 > [!note]
 >
-> 本package是对 [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat) 的维护型 fork —— 原作者 **Nico Bailon**，由 **yceachan** 扩展并在[ea-pi-extensions](https://github.com/yceachan/ea-pi-extensions) 中维护。
+> 本包是对 [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) 的**维护型 fork**（其本身又是 [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat) 的 fork），由 **hu3rror** 维护于 [hu3rror/pi-better-btw-plus](https://github.com/hu3rror/pi-better-btw-plus)。署名链：原作者 **Nico Bailon** → **yceachan** 扩展 → 本 fork。
 
 ## TL;DR
 
 **把当前会话 fork 到一个旁路会话（btw）中，主线 agent 继续干活。**
 
-[![npm version](https://img.shields.io/npm/v/@yceachan/pi-better-btw?style=for-the-badge)](https://www.npmjs.com/package/@yceachan/pi-better-btw)
+[![npm version](https://img.shields.io/npm/v/pi-better-btw-plus?style=for-the-badge)](https://www.npmjs.com/package/pi-better-btw-plus)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 ```bash
-pi install npm:@yceachan/pi-better-btw
-#in pi tui
+pi install npm:pi-better-btw-plus
+# in pi tui
 > /btw  || or Alt+W
 ```
 
-你在处理一个较长任务时，想顺便问点小事又不想打断主线——查一个 API 细节、验证一个思路、搜点东西，或者看看主线 agent 在干什么。打开BTW Tui OverLay，提问，关闭。主线线程完全不受打扰。
+处理长任务中途想顺便问点小事，又不想打断主线——查个 API 细节、验证一个思路、搜点东西，或瞄一眼主线 agent 在干什么。打开 btw TUI 浮层，提问，关闭，主线不受打扰。
 
-<img src="https://ali-oss-yceachan.oss-cn-chengdu.aliyuncs.com/img-bed-typora/image-20260817171045290.png" alt="image-20260817171045290" style="zoom:33%;" />
+<img src="https://raw.githubusercontent.com/hu3rror/pi-better-btw-plus/main/docs/overlay.png" alt="pi-better-btw-plus overlay" style="zoom:33%;" />
+
+## 本 fork 新增
+
+[`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) 的全部功能都在，另新增：
+
+- **右键复制与粘贴** —— 聊天区拖选后右键复制（延续 Windows Terminal 肌肉记忆）；输入框右键从系统剪贴板粘贴，走编辑器内置归一化与大段 `[paste #N …]` 折叠标记。不再是 hotkey-only。
+- **Fork 模型切换（`Alt+M`）** —— 侧聊内选择任意已认证模型，无需重建 fork；仅作用于 fork 本身（ADR 0002），thinking level 按新模型能力自动钳制。
+- **Turn 级自动重试** —— 与主会话共用 `settings.retry` 预算：瞬时 provider 错误指数退避重试，带实时倒计时；`Esc` 取消。
+- **功能开关** —— 分层配置的 `features` 块可关闭以上任意功能（`rightClickCopyPaste` / `modelSwitch` / `retry`），另有 `readOnlyExtensionAllowlistExclude` 移除内置 allowlist 默认项。
+
+完整功能见 [Feat](#feat)。
 
 ## Feat
 
@@ -203,6 +214,10 @@ btw 上下文保留主线的 system prompt 于 system 槽位，并逐字注入 f
 │   ├── side-chat-overlay.ts  # TUI 浮层、agent 生命周期、车道强制、鼠标路由
 │   ├── side-chat-messages.ts # 消息渲染、换行、选择、滚动
 │   ├── side-chat-mouse.ts    # 最小 SGR 鼠标解析
+│   ├── clipboard-read.ts    # 平台剪贴板读取（win32 / darwin / linux + OSC 52 兜底）
+│   ├── retry.ts             # turn 级重试引擎：classifyRetryable + runWithRetry
+│   ├── model-switch.ts      # Alt+M fork 模型选择器：列表构建 + thinking 钳制
+│   ├── shortcuts.ts         # 快捷键绑定（Alt+W / Ctrl+T）
 │   ├── side-chat-export.ts   # Alt+E 对话导出
 │   ├── tool-wrapper.ts       # 写路径重叠警告
 │   └── file-activity-tracker.ts
@@ -234,4 +249,4 @@ bun test            # bun test test/（串行运行，见 bunfig.toml）
 
 ## License
 
-MIT —— 见 [LICENSE](LICENSE)。许可证同时保留两行版权：上游原作者（Nico Bailon）与 fork 修改者（yceachan）。
+MIT —— 见 [LICENSE](LICENSE)。许可证同时保留三行版权：上游原作者（Nico Bailon）、中间 fork（yceachan）与本 fork（hu3rror）。

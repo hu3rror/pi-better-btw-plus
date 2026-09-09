@@ -1,7 +1,7 @@
 {
-  "name": "@yceachan/pi-better-btw",
-  "version": "1.0.1",
-  "description": "pi extension: /btw side-chat overlay forked from pi-side-chat, with main-context sharing and a side-lane guard",
+  "name": "pi-better-btw-plus",
+  "version": "1.0.0",
+  "description": "pi extension: /btw side-chat overlay — maintained fork of @yceachan/pi-better-btw (+ right-click copy/paste, fork model switch, turn-level retry)",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -13,17 +13,17 @@
     "tui",
     "coding-agent"
   ],
-  "author": "yceachan <yceachan@foxmail.com>",
+  "author": "hu3rror",
   "contributors": [
-    "Nico Bailon"
+    "Nico Bailon",
+    "yceachan <yceachan@foxmail.com>"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yceachan/ea-pi-extensions.git",
-    "directory": "packages/pi-better-btw"
+    "url": "git+https://github.com/hu3rror/pi-better-btw-plus.git"
   },
-  "homepage": "https://github.com/yceachan/ea-pi-extensions#readme",
+  "homepage": "https://github.com/hu3rror/pi-better-btw-plus#readme",
   "files": [
     "srcs",
     "prompts",

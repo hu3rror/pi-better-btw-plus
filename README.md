@@ -1,31 +1,42 @@
 <p>
-  <img src="banner.png" alt="pi-better-btw" width="1100">
+  <img src="https://raw.githubusercontent.com/hu3rror/pi-better-btw-plus/main/banner.png" alt="pi-better-btw-plus" width="1100">
 </p>
 
-# @yceachan/pi-better-btw
+# pi-better-btw-plus
 
 **English | [简体中文](README.zh-CN.md)**
 
 > [!note]
 >
-> This package is a maintained fork of [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat) — original author **Nico Bailon**; extended by **yceachan** and maintained in [ea-pi-extensions](https://github.com/yceachan/ea-pi-extensions).
+> This package is a **maintained fork** of [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) — itself a fork of [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat) — maintained by **hu3rror** at [hu3rror/pi-better-btw-plus](https://github.com/hu3rror/pi-better-btw-plus). Attribution: original author **Nico Bailon** → extended by **yceachan** → this fork.
 
 ## TL;DR
 
 **Fork the current conversation into a side chat (`btw`) while the main agent keeps working.**
 
-[![npm version](https://img.shields.io/npm/v/@yceachan/pi-better-btw?style=for-the-badge)](https://www.npmjs.com/package/@yceachan/pi-better-btw)
+[![npm version](https://img.shields.io/npm/v/pi-better-btw-plus?style=for-the-badge)](https://www.npmjs.com/package/pi-better-btw-plus)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 ```bash
-pi install npm:@yceachan/pi-better-btw
+pi install npm:pi-better-btw-plus
 # in pi tui
 > /btw  || or Alt+W
 ```
 
 You're in the middle of a longer task and want to ask something small without derailing the main thread — check an API detail, sanity-check an approach, search something, or peek at what the main agent is doing. Open the btw TUI overlay, ask, close it. The main thread never gets interrupted.
 
-<img src="https://ali-oss-yceachan.oss-cn-chengdu.aliyuncs.com/img-bed-typora/image-20260817171045290.png" alt="pi-better-btw overlay" />
+<img src="https://raw.githubusercontent.com/hu3rror/pi-better-btw-plus/main/docs/overlay.png" alt="pi-better-btw-plus overlay" />
+
+## What's New in This Fork
+
+Everything in [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) is here, plus:
+
+- **Right-click copy & paste** — drag-select chat text and right-click to copy (Windows Terminal muscle memory); right-click inside the input editor pastes the system clipboard through the editor's own normalization and `[paste #N …]` markers for large pastes. No more hotkey-only copying.
+- **Fork model switching (`Alt+M`)** — pick any authenticated model for the side chat without rebuilding the fork; fork-local only (ADR 0002), thinking level auto-clamped to the new model's capabilities.
+- **Turn-level auto-retry** — shares the main session's `settings.retry` budget: transient provider errors back off and retry with a live countdown; `Esc` cancels.
+- **Feature kill switches** — the layered config's `features` block turns any of the above off (`rightClickCopyPaste` / `modelSwitch` / `retry`), plus `readOnlyExtensionAllowlistExclude` to drop bundled allowlist defaults.
+
+See [Feat](#feat) for the full feature set.
 
 ## Feat
 
@@ -202,6 +213,9 @@ Structure:
 │   ├── side-chat-overlay.ts  # TUI overlay, agent lifecycle, lane enforcement, mouse routing
 │   ├── side-chat-messages.ts # message rendering, wrapping, selection, scrolling
 │   ├── side-chat-mouse.ts    # minimal SGR mouse parsing
+│   ├── clipboard-read.ts    # platform clipboard read (win32 / darwin / linux + OSC 52 fallback)
+│   ├── retry.ts             # turn-level retry: classifyRetryable + runWithRetry
+│   ├── shortcuts.ts         # hotkey bindings (Alt+W / Ctrl+T)
 │   ├── model-switch.ts       # Alt+M fork model picker: list building + thinking clamp
 │   ├── side-chat-export.ts   # Alt+E transcript export
 │   ├── tool-wrapper.ts       # write-path overlap warnings
@@ -234,4 +248,4 @@ The published package ships `srcs/`, `prompts/`, `config.json` and the docs; tes
 
 ## License
 
-MIT — see [LICENSE](LICENSE). The license retains both copyright lines: the original upstream author (Nico Bailon) and the fork's modifier (yceachan).
+MIT — see [LICENSE](LICENSE). The license retains all three copyright lines: the original upstream author (Nico Bailon), the intermediate fork (yceachan), and this fork (hu3rror).

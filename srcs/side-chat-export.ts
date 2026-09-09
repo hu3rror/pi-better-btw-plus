@@ -212,7 +212,7 @@ export function buildExportMarkdown(opts: ExportSideChatOptions): string {
       : rest;
 
   const lines: string[] = [];
-  lines.push("# btw Chat Export — @yceachan/pi-better-btw");
+  lines.push("# btw Chat Export — pi-better-btw-plus");
   lines.push("");
   lines.push(
     "_Exported with `Alt+E` from the btw overlay — diagnostic artifact for feature work._",
