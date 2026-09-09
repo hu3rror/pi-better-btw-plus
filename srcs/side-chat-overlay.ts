@@ -125,13 +125,14 @@ const DOUBLE_CLICK_INTERVAL_MS = 500;
 
 /**
  * True when a drag release ended within the double-click tolerance (same
- * line within a couple of cells). Real terminals report motion even for
+ * line, within a couple of cells). Real terminals report motion even for
  * 1-cell hand shake during a double-click, so a selection this small is a
  * click, not a drag — it must not suppress the next press's double-click
- * classification.
+ * classification. Only the same line counts: a real cross-line drag of a
+ * couple of cells stays a drag, never a click.
  */
 function selectionWithinClickTolerance(a: CellPos, b: CellPos): boolean {
-  return Math.abs(a.line - b.line) <= 1 && Math.abs(a.col - b.col) <= 2;
+  return a.line === b.line && Math.abs(a.col - b.col) <= 2;
 }
 /** Wheel scroll step in lines (matches the previous mouse handler). */
 const WHEEL_SCROLL_LINES = 3;
@@ -1089,7 +1090,7 @@ export class SideChatOverlay implements Component, Focusable {
     // renderSideChatFrame; one message row is traded for the second hint row.
     const hintLines = this.modelPicker
       ? buildSideChatModelPickerHints()
-      : buildSideChatHintLines({ scrollHint, escHint, modeHint });
+      : buildSideChatHintLines({ scrollHint, escHint, modeHint, features: this.options.features });
     const maxLines = Math.max(
       3,
       this.computeChatHeight() - (hintLines.length - 1),
@@ -1472,9 +1473,9 @@ function frameLine(
   );
 }
 
-/** Alt-actions hint row, shared by the normal and model-picker hint bars. */
-const ALT_ACTION_HINTS = `A+w bg · A+r fork · A+n new · A+e export · A+m model`;
-
+/** Alt-actions hint row base; the model entry is appended only when the switch is on. */
+const ALT_ACTIONS_BASE = `A+w bg · A+r fork · A+n new · A+e export`;
+const ALT_ACTION_HINTS = `${ALT_ACTIONS_BASE} · A+m model`;
 /**
  * Build the fixed two-row key-hint bar. Row 1: scrolling, copy, mode toggle,
  * Esc and send; row 2: the Alt-actions (Alt abbreviated as A, A+w = Alt+W).
@@ -1485,12 +1486,17 @@ export function buildSideChatHintLines(options: {
   scrollHint: string;
   escHint: string;
   modeHint: string;
+  /** Feature switches (D11): a disabled behavior is not advertised in the hints. */
+  features: SideChatFeatures;
 }): string[] {
-  const { scrollHint, escHint, modeHint } = options;
+  const { scrollHint, escHint, modeHint, features } = options;
   // Right-click semantics live next to the copy hint: chat-area right-click
   // copies a retained selection, editor right-click pastes (D10).
-  const primary = `${scrollHint} · C+c copy · R-click copy/paste · ${modeHint} · ${escHint} · Enter send`;
-  const secondary = ALT_ACTION_HINTS;
+  const rightClickHint = features.rightClickCopyPaste
+    ? " · R-click copy/paste"
+    : "";
+  const primary = `${scrollHint} · C+c copy${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
+  const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? " · A+m model" : ""}`;
   return [primary, secondary];
 }
 

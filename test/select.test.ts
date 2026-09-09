@@ -298,6 +298,24 @@ describe("side-chat-overlay.ts", () => {
     expect(M.getSelectedText().startsWith("[You]: hello world")).toBe(true);
   });
 
+  test("a cross-line drag of a couple of cells stays a drag, not a click (tolerance is same-line only)", async () => {
+    // Tightening: the double-click tolerance only swallows same-line hand
+    // shake. A release one line down (line diff 1, col diff ≤ 2) is a real
+    // drag — lastReleaseWasDrag stays true, so the next press is a plain
+    // press and must NOT select the whole line.
+    const overlay = makeOverlay();
+    const M: any = (overlay as any).messages;
+    overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 19, row: 6, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 6, isRelease: true });
+    overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 18, row: 5, isRelease: true });
+    await tick();
+    // The second press was not classified as a double-click: no whole-line
+    // selection, and the final plain click cleared any selection.
+    expect(M.getSelectedText()).toBe("");
+  });
+
   test("drag beyond the viewport clamps to the last line", () => {
     const overlay = makeOverlay();
     overlay.handleMouseEvent({ button: 0, col: 14, row: 5, isRelease: false });

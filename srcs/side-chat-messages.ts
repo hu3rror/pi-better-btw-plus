@@ -164,11 +164,6 @@ export class SideChatMessages implements Component {
     return this.selection?.anchor ?? null;
   }
 
-  /** The current selection focus (window coordinates), or null when no selection. */
-  getSelectionFocus(): CellPos | null {
-    return this.selection?.focus ?? null;
-  }
-
   /** True when a non-empty selection is active (highlights are rendered). */
   hasSelection(): boolean {
     if (!this.selection) return false;

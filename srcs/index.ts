@@ -28,12 +28,15 @@ import { extractWritePaths } from "./tool-wrapper.ts";
 // Patch to capture the runner instance for extension tool access in side chat.
 let capturedRunner: ExtensionRunner | null = null;
 // Patch once (module reloads re-execute this file; re-patching would nest the
-// wrapper one level per /reload and eventually blow the stack). Mark the
-// prototype so re-entry is a no-op.
-if (!(ExtensionRunner.prototype as any).__btwRunnerCaptured) {
+// wrapper one level per /reload and eventually blow the stack). The marker
+// lives in the Symbol.for registry (global across module reloads and other
+// extensions) so re-entry is a no-op without a string-keyed prototype prop
+// another extension could collide with.
+const RUNNER_CAPTURED = Symbol.for("__btwRunnerCaptured");
+if (!(ExtensionRunner.prototype as unknown as Record<symbol, unknown>)[RUNNER_CAPTURED]) {
   const origGetAllRegisteredTools =
     ExtensionRunner.prototype.getAllRegisteredTools;
-  (ExtensionRunner.prototype as any).__btwRunnerCaptured = true;
+  (ExtensionRunner.prototype as unknown as Record<symbol, unknown>)[RUNNER_CAPTURED] = true;
   ExtensionRunner.prototype.getAllRegisteredTools = function () {
     capturedRunner = this;
     return origGetAllRegisteredTools.call(this);
@@ -62,6 +65,15 @@ function getExtensionAgentTools(): AgentTool[] {
 }
 
 const OVERLAY_BLOCKED_ERROR = "PI_SIDE_CHAT_OVERLAY_BLOCKED";
+
+/**
+ * Log an open failure that escapes openSideChat's own state cleanup
+ * (fire-and-forget /btw & Alt+W paths). Error-only channel: never called on
+ * the happy path, so it can't pollute the TUI's normal rendering.
+ */
+function logOpenFailure(error: unknown): void {
+  console.error("[btw] failed to open side chat:", error);
+}
 
 /** Extension directory: base for the bundle config.json and prompt-pack paths. */
 const extensionDir = getExtensionDir();
@@ -150,22 +162,32 @@ export default function sideChatExtension(pi: ExtensionAPI) {
     }
   };
 
+  /** Restore a hidden overlay to the foreground and re-enable mouse reporting. */
+  const restoreOverlay = (handle: OverlayHandle) => {
+    handle.setHidden(false);
+    handle.focus();
+    syncMouseReporting();
+  };
+
+  /** Background a visible overlay: release focus, hide, and disable mouse reporting. */
+  const hideOverlay = (handle: OverlayHandle) => {
+    handle.unfocus();
+    handle.setHidden(true);
+    syncMouseReporting();
+  };
+
   /** Toggle the side chat between hidden (backgrounded) and visible. Opens it if needed. */
   const backgroundSideChat = async (ctx: ExtensionContext) => {
     if (!activeOverlay) {
-      void openSideChat(ctx); // fire-and-forget, see toggleSideChat
+      void openSideChat(ctx).catch(logOpenFailure); // fire-and-forget, see toggleSideChat
       return;
     }
     const handle = overlayHandle;
     if (!handle) return;
     if (handle.isHidden()) {
-      handle.setHidden(false);
-      handle.focus();
-      syncMouseReporting();
+      restoreOverlay(handle);
     } else {
-      handle.unfocus();
-      handle.setHidden(true);
-      syncMouseReporting();
+      hideOverlay(handle);
     }
   };
 
@@ -182,9 +204,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
       if (!handle) return;
       if (handle.isHidden()) {
         // Hidden in the background: restore and focus.
-        handle.setHidden(false);
-        handle.focus();
-        syncMouseReporting();
+        restoreOverlay(handle);
         return;
       }
       // The Alt+/ focus toggle was dropped (Alt+W owns background/restore):
@@ -202,7 +222,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
     // later slash command — including a second /btw meant to re-open the
     // hidden overlay — queues in pendingUserInputs and never runs. The
     // overlay's own close/refork/clear handling happens inside openSideChat.
-    void openSideChat(ctx);
+    void openSideChat(ctx).catch(logOpenFailure);
   };
 
   const openSideChat = async (ctx: ExtensionContext, clear = false) => {
@@ -280,17 +300,16 @@ export default function sideChatExtension(pi: ExtensionAPI) {
               // reported "/btw won't re-open after Alt+W" bug). The Alt+W
               // shortcut handler runs asynchronously from the editor and is
               // unaffected; this mirrors it.
+              const scheduledHandle = overlayHandle;
               setTimeout(() => {
-                const handle = overlayHandle;
-                if (!handle) return;
-                if (handle.isHidden()) {
-                  handle.setHidden(false);
-                  handle.focus();
-                  syncMouseReporting();
+                // Identity check: if the overlay closed and a new one opened
+                // within the 0ms window, only act on the handle we scheduled
+                // for — never toggle a brand-new overlay.
+                if (!scheduledHandle || overlayHandle !== scheduledHandle) return;
+                if (scheduledHandle.isHidden()) {
+                  restoreOverlay(scheduledHandle);
                 } else {
-                  handle.unfocus();
-                  handle.setHidden(true);
-                  syncMouseReporting();
+                  hideOverlay(scheduledHandle);
                 }
               }, 0);
             },

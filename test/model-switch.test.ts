@@ -29,7 +29,7 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
     noMatch: identity,
   }),
 }));
-const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
+const { SideChatOverlay, buildSideChatHintLines } = await import("../srcs/side-chat-overlay.ts");
 
 import type { Model } from "@earendil-works/pi-ai";
 
@@ -398,5 +398,41 @@ describe("side-chat-overlay model picker", () => {
       String(m.content ?? "").includes("Model:"),
     );
     expect(framing?.content).toContain("Model: glm-new");
+  });
+
+});
+
+describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
+  const base = {
+    scrollHint: "Pg/Scr ↑↓",
+    escHint: "Esc close",
+    modeHint: "Ctrl+T edit",
+  };
+
+  test("all features on: right-click and Alt+M are advertised", () => {
+    const [primary, secondary] = buildSideChatHintLines({
+      ...base,
+      features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
+    });
+    expect(primary).toContain("R-click copy/paste");
+    expect(secondary).toContain("A+m model");
+  });
+
+  test("rightClickCopyPaste=false: the right-click hint is dropped, hotkey hint stays", () => {
+    const [primary] = buildSideChatHintLines({
+      ...base,
+      features: { rightClickCopyPaste: false, modelSwitch: true, retry: true },
+    });
+    expect(primary).not.toContain("R-click");
+    expect(primary).toContain("C+c copy");
+  });
+
+  test("modelSwitch=false: the Alt+M hint is dropped, other Alt-actions stay", () => {
+    const [, secondary] = buildSideChatHintLines({
+      ...base,
+      features: { rightClickCopyPaste: true, modelSwitch: false, retry: true },
+    });
+    expect(secondary).not.toContain("A+m");
+    expect(secondary).toContain("A+w bg");
   });
 });
