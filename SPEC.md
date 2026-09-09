@@ -44,7 +44,7 @@ pi-better-btw（侧聊 overlay 扩展）在 Windows Terminal 下有三个痛点�
 
 - **D1（鼠标捕获模型不变）**：overlay 可见期间维持现有的 xterm 鼠标上报（button + motion + SGR）。终端逃逸序列不支持按区域开/关鼠标模式，因此不做区域化 passthrough；右键在 overlay 内部成为应用层动作，而不是试图转发给终端。背景化（Alt+W）保持为恢复终端原生行为的出口。
 - **D2（右键语义）**：在现有鼠标事件处理中增加右键（button 2）分支，按命中区域决策：聊天消息区 + 存在拖拽选区 → 复制选区（复用现有复制到剪贴板 + 状态提示逻辑，选区保持高亮）；输入编辑器区 → 粘贴；其它区域（边框/头部）→ 忽略。释放右键时执行动作，避免按下即触发。右键命中决策不拆纯函数，直接在 overlay 鼠标事件层实现并以外部行为测试覆盖。
-- **D3（剪贴板读取）**：新增自包含的剪贴板读取 helper，平台通道以**注入函数**传入：win32 → `Get-Clipboard -Raw`（与 pi 自身读剪贴板图片的 PowerShell 通道一致）；darwin → `pbpaste`；linux → OSC 52 query（`\x1b]52;c;?\x07`，读响应）。平台通道失败时逐级回退，全部不可用时返回 null，由调用方静默降级并提示。写剪贴板沿用 `copyToClipboard`（公开导出）。
+- **D3（剪贴板读取）**：新增自包含的剪贴板读取 helper，平台通道以**注入函数**传入：win32 → 优先 `@mariozechner/clipboard` native addon 的 `getText`（pi 自身读剪贴板用的同一 addon，亚毫秒且不阻塞事件循环），回退 `Get-Clipboard -Raw`（与 pi 自身读剪贴板图片的 PowerShell 通道一致），再回退 OSC 52 query；darwin → native addon → `pbpaste` → OSC 52；linux → OSC 52 query（`\x1b]52;c;?\x07`，读响应）。平台通道失败时逐级回退，全部不可用时返回 null，由调用方静默降级并提示。写剪贴板沿用 `copyToClipboard`（公开导出）。
 - **D4（编辑器粘贴）**：粘贴**走 pi-tui Editor 内置的粘贴入口**，不手写归一化：Editor 自带大段折叠（>10 行或 >1000 字符 → `[paste #N +X lines]` / `[paste #N X chars]` 标记，提交时展开）、`normalizeText`（`\r`→`\n`、`\t`→4 空格）、原子 undo 快照与 onChange。submit 路径必须用展开后的文本（`getExpandedText` 语义）发给 agent，避免把标记原文发给模型。
 - **D5（模型切换机制，已验证）**：保持 fork 自己的 transcript 不变，运行时替换 agent 的当前模型——`agent.state.model` 与 `agent.state.thinkingLevel` 均在每次 turn 构建配置快照时重读（pi-agent-core 已核实），无需重建 agent。切换后按新模型能力钳制 thinking level（`"off"` 映射为 `reasoning: undefined`），照抄主会话 `setThinkingLevel` 的 clamp 语义。主会话的模型接口不动——侧聊模型选择只影响 fork 自身（ADR 0002）。
 - **D6（模型列表来源）**：优先使用会话作用域模型集（scoped models），为空（未配置 scoping）时回退到可用模型目录；**过滤**掉未配置认证的模型（"只显示"，而非置灰）。

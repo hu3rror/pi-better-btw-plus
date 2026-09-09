@@ -12,6 +12,7 @@ import {
   OSC52_QUERY,
   buildPlatformChannels,
   decodeOsc52Payload,
+  makeNativeChannel,
   makeOsc52Channel,
   makePbpasteChannel,
   makePowerShellChannel,
@@ -21,6 +22,7 @@ import {
   type ClipboardReadChannel,
   type ClipboardReadOutcome,
   type ExecFn,
+  type NativeClipboardAddon,
 } from "../srcs/clipboard-read.ts";
 
 const ok = (text: string): ClipboardReadOutcome => ({ ok: true, text });
@@ -184,6 +186,36 @@ describe("channel factories", () => {
       await expect(chan.read()).resolves.toEqual(unavailable);
     }
   });
+
+  test("native channel reads via the addon's getText", async () => {
+    const addon: NativeClipboardAddon = { getText: async () => "native text" };
+    await expect(
+      makeNativeChannel({ loadNative: () => addon }).read(),
+    ).resolves.toEqual(ok("native text"));
+  });
+
+  test("native channel reports empty when the addon sees no text", async () => {
+    for (const value of [null, ""]) {
+      const addon: NativeClipboardAddon = { getText: async () => value };
+      await expect(
+        makeNativeChannel({ loadNative: () => addon }).read(),
+      ).resolves.toEqual(empty);
+    }
+  });
+
+  test("native channel reports unavailable when the addon is missing / throws", async () => {
+    await expect(makeNativeChannel({ loadNative: () => null }).read()).resolves.toEqual(
+      unavailable,
+    );
+    const boom: NativeClipboardAddon = {
+      getText: async () => {
+        throw new Error("addon exploded");
+      },
+    };
+    await expect(makeNativeChannel({ loadNative: () => boom }).read()).resolves.toEqual(
+      unavailable,
+    );
+  });
 });
 
 describe("parseOsc52Reply / decodeOsc52Payload", () => {
@@ -219,20 +251,22 @@ describe("parseOsc52Reply / decodeOsc52Payload", () => {
 });
 
 describe("platform channel matrix", () => {
-  test("win32: PowerShell primary, OSC 52 fallback", () => {
+  test("win32: native primary, PowerShell fallback, OSC 52 last", () => {
     const names = buildPlatformChannels({
       platform: "win32",
       exec: execFail,
+      loadNative: () => null,
     }).map((c) => c.name);
-    expect(names).toEqual(["powershell", "osc52"]);
+    expect(names).toEqual(["native", "powershell", "osc52"]);
   });
 
-  test("darwin: pbpaste primary, OSC 52 fallback", () => {
+  test("darwin: native primary, pbpaste fallback, OSC 52 last", () => {
     const names = buildPlatformChannels({
       platform: "darwin",
       exec: execFail,
+      loadNative: () => null,
     }).map((c) => c.name);
-    expect(names).toEqual(["pbpaste", "osc52"]);
+    expect(names).toEqual(["native", "pbpaste", "osc52"]);
   });
 
   test("linux: OSC 52 only", () => {
@@ -252,6 +286,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk("from powershell\r\n"),
+      loadNative: () => null, // native addon unavailable — PowerShell path
       write: (s) => written.push(s),
       readReply: async () => null,
     });
@@ -264,6 +299,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk(""),
+      loadNative: () => null, // native addon unavailable — PowerShell path
       write: (s) => written.push(s),
       readReply: async () => null,
     });
@@ -276,6 +312,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execFail,
+      loadNative: () => null, // native addon unavailable — PowerShell path
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("from osc52"),
     });
@@ -288,6 +325,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "darwin",
       exec: execFail,
+      loadNative: () => null, // native addon unavailable — pbpaste path
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("mac fallback"),
     });
@@ -306,11 +344,61 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     expect(written).toEqual([OSC52_QUERY]);
   });
 
+  test("win32: native addon success short-circuits (no subprocess, no OSC 52)", async () => {
+    const written: string[] = [];
+    let execCalls = 0;
+    const outcome = await readClipboardTextFromSystem({
+      platform: "win32",
+      exec: () => {
+        execCalls += 1;
+        return { ok: true, stdout: "should not run" };
+      },
+      write: (s) => written.push(s),
+      readReply: async () => null,
+      loadNative: () => ({ getText: async () => "from native addon" }),
+    });
+    expect(outcome).toEqual(ok("from native addon"));
+    expect(execCalls).toBe(0); // PowerShell never spawned
+    expect(written).toEqual([]); // no OSC 52 query
+  });
+
+  test("win32: native empty is definitive (no subprocess, no OSC 52)", async () => {
+    const written: string[] = [];
+    let execCalls = 0;
+    const outcome = await readClipboardTextFromSystem({
+      platform: "win32",
+      exec: () => {
+        execCalls += 1;
+        return { ok: true, stdout: "should not run" };
+      },
+      write: (s) => written.push(s),
+      readReply: async () => null,
+      loadNative: () => ({ getText: async () => null }),
+    });
+    expect(outcome).toEqual(empty);
+    expect(execCalls).toBe(0);
+    expect(written).toEqual([]);
+  });
+
+  test("win32: native unavailable falls through to PowerShell, then OSC 52", async () => {
+    const written: string[] = [];
+    const outcome = await readClipboardTextFromSystem({
+      platform: "win32",
+      exec: execFail,
+      write: (s) => written.push(s),
+      readReply: async () => osc52Reply("deep fallback"),
+      loadNative: () => null,
+    });
+    expect(outcome).toEqual(ok("deep fallback"));
+    expect(written).toEqual([OSC52_QUERY]);
+  });
+
   test("all channels fail → unavailable, never throws", async () => {
     await expect(
       readClipboardTextFromSystem({
         platform: "win32",
         exec: () => { throw new Error("powershell missing"); },
+        loadNative: () => null, // native addon unavailable too
         write: () => {},
         readReply: async () => null,
       }),

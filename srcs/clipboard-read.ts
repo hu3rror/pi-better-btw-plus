@@ -6,9 +6,9 @@
  * is self-built because `readClipboardText` is not re-exported from the
  * package entry. Each platform maps to a primary channel:
  *
- *   - win32  → PowerShell `Get-Clipboard -Raw` (same channel family as pi's
- *     clipboard-image reader), then an OSC 52 query;
- *   - darwin → `pbpaste`, then an OSC 52 query;
+ *   - win32  → native addon `getText` (pi's own clipboard read), then
+ *     PowerShell `Get-Clipboard -Raw`, then an OSC 52 query;
+ *   - darwin → native addon `getText`, then `pbpaste`, then OSC 52 query;
  *   - linux  → OSC 52 query (`\x1b]52;c;?\x07`, read the reply).
  *
  * Channels are injected functions, so tests mock success / fallback /
@@ -19,6 +19,9 @@
  */
 import { spawnSync } from "node:child_process";
 
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 /**
  * Outcome of reading the system clipboard: text, an explicitly empty
  * clipboard (a channel ran and saw nothing), or no usable channel at all.
@@ -155,6 +158,87 @@ function makeCommandChannel(
       return text.length > 0
         ? { ok: true, text }
         : { ok: false, reason: "empty" };
+    },
+  };
+}
+
+/**
+ * Native clipboard addon (win32 / darwin primary read channel): the
+ * `@mariozechner/clipboard` napi addon pi itself uses for reads and writes.
+ * Its `getText` is a sub-millisecond, non-blocking call — vs. the PowerShell
+ * `Get-Clipboard` subprocess, which cold-starts ~1s and blocks the event loop
+ * with `spawnSync` (the source of the right-click-paste lag). Resolution
+ * mirrors pi's `clipboard-native` loader: the package's own `require` first,
+ * then a `require` rooted at the pi executable's directory.
+ *
+ * The addon is an optional dependency provided at runtime by the pi host
+ * environment — deliberately not listed in package.json to avoid
+ * cross-platform prebuild dependency issues. When it is missing or fails to
+ * load, the channel reports `unavailable` and the fallback chain
+ * (PowerShell / pbpaste → OSC 52) takes over.
+ */
+export interface NativeClipboardAddon {
+  /** Resolve the clipboard's plain text; null when it holds no text. */
+  getText(): Promise<string | null>;
+}
+
+let cachedNativeAddon: NativeClipboardAddon | null | undefined;
+
+function loadNativeAddon(): NativeClipboardAddon | null {
+  if (cachedNativeAddon !== undefined) return cachedNativeAddon;
+  const moduleRequire = createRequire(import.meta.url);
+  const executableDirRequire = createRequire(
+    pathToFileURL(join(dirname(process.execPath), "package.json")).href,
+  );
+  cachedNativeAddon = null;
+  for (const requireClipboard of [moduleRequire, executableDirRequire]) {
+    try {
+      const addon = requireClipboard("@mariozechner/clipboard") as
+        | { getText?: () => Promise<string | null> }
+        | undefined;
+      if (addon && typeof addon.getText === "function") {
+        cachedNativeAddon = addon as NativeClipboardAddon;
+        break;
+      }
+    } catch {
+      // Try the next resolution root.
+    }
+  }
+  return cachedNativeAddon;
+}
+
+export interface NativeChannelOptions {
+  /** Native addon loader override (tests). Defaults to {@link loadNativeAddon}. */
+  loadNative?: () => NativeClipboardAddon | null;
+}
+
+/**
+ * Native channel: read plain text via the `@mariozechner/clipboard` addon.
+ * A missing/unloadable addon reports `unavailable`; a loaded addon that sees
+ * no text reports `empty` (definitive, stops the cascade).
+ */
+export function makeNativeChannel(
+  options: NativeChannelOptions = {},
+): ClipboardReadChannel {
+  const load = options.loadNative ?? loadNativeAddon;
+  return {
+    name: "native",
+    async read() {
+      let addon: NativeClipboardAddon | null;
+      try {
+        addon = load();
+      } catch {
+        addon = null;
+      }
+      if (!addon) return { ok: false, reason: "unavailable" };
+      try {
+        const text = await addon.getText();
+        return text && text.length > 0
+          ? { ok: true, text }
+          : { ok: false, reason: "empty" };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
     },
   };
 }
@@ -298,13 +382,14 @@ export interface PlatformChannelsOptions {
   exec?: ExecFn;
   write?: (sequence: string) => void;
   readReply?: (timeoutMs: number) => Promise<string | null>;
+  /** Native addon loader override (tests). Defaults to the real loader. */
+  loadNative?: () => NativeClipboardAddon | null;
 }
-
 /**
  * The per-platform channel matrix (primary first, then fallbacks). win32 /
- * darwin lead with their native tool and fall back to an OSC 52 query;
- * linux (and unknown platforms) query OSC 52 directly — mirroring the
- * write-side cascade where OSC 52 is the universal last resort.
+ * darwin lead with the native addon, fall back to their platform tool, then
+ * to an OSC 52 query; linux (and unknown platforms) query OSC 52 directly —
+ * mirroring the write-side cascade where OSC 52 is the universal last resort.
  */
 export function buildPlatformChannels(
   options: PlatformChannelsOptions = {},
@@ -316,11 +401,13 @@ export function buildPlatformChannels(
   switch (options.platform ?? process.platform) {
     case "win32":
       return [
+        makeNativeChannel({ loadNative: options.loadNative }),
         makePowerShellChannel({ exec: options.exec, env: options.env }),
         osc52,
       ];
     case "darwin":
       return [
+        makeNativeChannel({ loadNative: options.loadNative }),
         makePbpasteChannel({ exec: options.exec, env: options.env }),
         osc52,
       ];
