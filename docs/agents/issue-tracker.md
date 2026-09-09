@@ -2,7 +2,7 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
-> 当前仓库还没有 git remote。推送到 GitHub 后（`git remote add origin <repo>` + push），在仓库内执行 `gh` 命令会自动识别。
+> 仓库已配置 remote `hu3rror/pi-better-btw-plus`；在仓库内执行 `gh` 命令会自动识别。
 
 ## Conventions
 
