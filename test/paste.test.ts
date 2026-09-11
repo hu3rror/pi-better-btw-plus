@@ -85,18 +85,24 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
   });
 
   test("submit sends the expanded text (not the marker) to the agent", async () => {
-    const overlay = makeOverlay();
+    const prompts: string[] = [];
+    const overlay = makeOverlay(undefined, {
+      // The turn loop lives in the runner: a harness runner records the
+      // submitted text instead of hitting the network.
+      runnerFactory: () =>
+        ({
+          agent: { state: { messages: [] } },
+          isRunning: false,
+          run: async (text: string) => {
+            prompts.push(text);
+          },
+          cancel: () => {},
+        }) as any,
+    });
     const big = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
     setClipboardReadResult(big);
     rightClick(overlay, editorRow(overlay));
     await tick();
-    const prompts: string[] = [];
-    (overlay as any).agent = {
-      prompt: async (text: string) => {
-        prompts.push(text);
-      },
-      state: { messages: [] },
-    };
     overlay.handleInput("\r"); // Enter submits via the editor's submit path
     await tick();
     expect(prompts).toEqual([big]);

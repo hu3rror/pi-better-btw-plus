@@ -103,6 +103,7 @@ function makeOverlay(overrides: any = {}): SideChatOverlayType {
       laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
     },
     readOnlyExtensionAllowlist: [],
+    retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 2000 },
     features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
     onOverlapWarning: async () => true,
     onBackground: () => {},
@@ -123,8 +124,11 @@ function picker(overlay: SideChatOverlayType): any {
 }
 
 function agentState(overlay: SideChatOverlayType): any {
-  return (overlay as any).agent.state;
+  // The overlay owns the runner; the agent lives behind runner.agent.
+  return (overlay as any).runner.agent.state;
 }
+
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
 // --- Pure: buildModelChoices --------------------------------------------------
 
@@ -318,8 +322,22 @@ describe("side-chat-overlay model picker", () => {
   test("opening is rejected while streaming", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
+      // A turn in flight: the runner reports isRunning and the picker stays
+      // shut (the model cannot be swapped mid-turn).
+      runnerFactory: () =>
+        ({
+          agent: {
+            state: {
+              model: makeModel("current-model"),
+              thinkingLevel: "medium",
+              messages: [],
+            },
+          },
+          isRunning: true,
+          run: async () => {},
+          cancel: () => {},
+        }) as any,
     });
-    (overlay as any).isStreaming = true;
     overlay.handleInput(ALT_M);
     expect(picker(overlay)).toBeNull();
     const M: any = (overlay as any).messages;
@@ -372,6 +390,7 @@ describe("side-chat-overlay model picker", () => {
     // runtime model but the framing text stayed stale, so asking the agent
     // "what model are you" answered with the old one. Every turn re-substitutes
     // the framing block with the current fork model.
+    let fakeRunner: any;
     const overlay = makeOverlay({
       promptPack: {
         framing: "Model: {{model}}",
@@ -379,21 +398,32 @@ describe("side-chat-overlay model picker", () => {
         laneReminders: { preamble: "", base: "", escalated: "", failedNote: "" },
       },
       retryPolicy: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
+      // Harness: build the runner from the overlay's assembled deps; the fake
+      // agent carries the initial state (framing message included) and swallows
+      // the turn so it never hits the network.
+      runnerFactory: (runnerOptions: any) => {
+        const initialState = runnerOptions.agentOptions.initialState;
+        fakeRunner = {
+          agent: {
+            state: {
+              ...initialState,
+              messages: [...(initialState?.messages ?? [])],
+            },
+          },
+          isRunning: false,
+          run: async () => {},
+          cancel: () => {},
+        };
+        return fakeRunner;
+      },
     });
     // Switch the fork model the way Alt+M confirm does.
-    const st = agentState(overlay);
+    const st = (overlay as any).runner.agent.state;
     st.model = makeModel("glm-new", false);
-    // Fake agent so the turn never hits the network; keep the messages
-    // (framing included) and the switched model.
-    const realState = st;
-    (overlay as any).agent = {
-      prompt: async () => {},
-      continue: async () => {},
-      abort: () => {},
-      subscribe: () => {},
-      state: { ...realState, model: makeModel("glm-new", false) },
-    };
-    await (overlay as any).handleSubmit("hi");
+    // Submit through the editor (the overlay's public submit path).
+    overlay.handleInput("hi");
+    overlay.handleInput("\r");
+    await tick();
     const framing = (st.messages as any[]).find((m) =>
       String(m.content ?? "").includes("Model:"),
     );

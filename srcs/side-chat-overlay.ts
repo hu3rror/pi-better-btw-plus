@@ -1,6 +1,4 @@
 import {
-  Agent,
-  type AgentEvent,
   type AgentMessage,
   type AgentTool,
   type ThinkingLevel,
@@ -36,6 +34,11 @@ import {
 import type { FileActivityTracker } from "./file-activity-tracker.ts";
 import { forkSurgery } from "./fork-surgery.ts";
 import {
+  ForkTurnRunner,
+  type ForkTurnRunnerOptions,
+  type TurnPhase,
+} from "./fork-turn.ts";
+import {
   readClipboardTextFromSystem,
   type ClipboardReadOutcome,
 } from "./clipboard-read.ts";
@@ -66,14 +69,7 @@ import {
 import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 import type { SideChatFeatures } from "./config.ts";
-import {
-  classifyRetryable,
-  runWithRetry,
-  type RetryableFailure,
-  type RetryableInput,
-  type RetryAttemptInfo,
-  type RetryPolicy,
-} from "./retry.ts";
+import type { RetryPolicy } from "./retry.ts";
 export interface ForkContext {
   messages: AgentMessage[];
   model: Model<any>;
@@ -103,6 +99,15 @@ interface SideChatOverlayOptions {
   retryPolicy: RetryPolicy;
   /** Per-feature kill switches resolved from the layered config (D11). */
   features: SideChatFeatures;
+  /**
+   * Test seam (default: one-line passthrough constructing the real
+   * ForkTurnRunner). The overlay assembles the runner's deps (agent options,
+   * features-ANDed retry policy, prompt pack, live lane closures, phase
+   * sink) and delegates the whole turn loop to it — the runner owns the
+   * agent, retry backoff and lane enforcement, and reports TurnPhase events
+   * the overlay renders.
+   */
+  runnerFactory?: (options: ForkTurnRunnerOptions) => ForkTurnRunner;
   onOverlapWarning: (path: string) => Promise<boolean>;
   onBackground: () => void;
   onClose: (
@@ -200,10 +205,9 @@ const PRE_ABORT_TEXT = "Turn stopped after repeated out-of-lane attempts.";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export class SideChatOverlay implements Component, Focusable {
-  private agent: Agent;
+  private runner: ForkTurnRunner;
   private messages: SideChatMessages;
   private editor: Editor;
-  private isStreaming = false;
   private streamingContent = "";
   private toolMode: "full" | "read-only" = "read-only";
   private _focused = true;
@@ -235,22 +239,10 @@ export class SideChatOverlay implements Component, Focusable {
   private forkedMessageCount: number;
   /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
   private readOnlyToolNames = new Set<string>();
-  /** Out-of-lane attempts in the current turn (reset on each new user message). */
-  private laneViolations = 0;
-  /** Reminder queued for injection by transformContext before the next LLM call. */
-  private pendingReminder: string | null = null;
-  /** When true, the turn is aborted right after the escalated reminder is injected. */
-  private abortAfterInject = false;
   /** Open Alt+M model picker modal, or null when closed (modal replaces the chat area). */
   private modelPicker: SelectList | null = null;
   /** Choices backing the open picker (index-aligned with its SelectItems). */
   private modelPickerChoices: ModelChoice[] = [];
-  /**
-   * Per-turn retry cancellation (D9): Esc aborts this controller so the
-   * backoff wait stops and the last error surfaces as the final result. Null
-   * while no turn is in flight.
-   */
-  private retryAbortController: AbortController | null = null;
   /** Countdown ticker for the retry status line (cleared when the wait ends). */
   private retryCountdown: NodeJS.Timeout | null = null;
 
@@ -570,88 +562,6 @@ export class SideChatOverlay implements Component, Focusable {
       timestamp: Date.now(),
     });
 
-    this.agent = new Agent({
-      streamFn: streamSimple,
-      initialState: {
-        // Shared-prefix layout (#9): the MAIN persona stays in the system
-        // slot so the request head matches the main lane token-for-token.
-        systemPrompt: forkContext.systemPrompt,
-        model: forkContext.model,
-        thinkingLevel: forkContext.thinkingLevel,
-        tools: this.buildReadOnlyTools(),
-        messages: [...forkedMessages, framingMessage],
-      },
-      convertToLlm,
-      getApiKey: async (provider) => {
-        const key = await modelRegistry.getApiKeyForProvider(provider);
-        if (!key) throw new Error("No API key available");
-        return key;
-      },
-      // Transient tail injections (present in the LLM request only, never
-      // stored in the transcript), texts from the prompt pack:
-      // - focus anchor: every turn, both modes (recency position);
-      // - lane preamble: read-only lane only (full mode stays untouched);
-      // - pending lane reminder: after an out-of-lane attempt; escalated
-      //   violations abort the turn right after the reminder is queued.
-      transformContext: async (messages) => {
-        const additions: AgentMessage[] = [
-          {
-            role: "user",
-            content: promptPack.focusAnchor,
-            timestamp: Date.now(),
-          },
-        ];
-        if (this.toolMode === "read-only") {
-          additions.push({
-            role: "user",
-            content: promptPack.laneReminders.preamble,
-            timestamp: Date.now(),
-          });
-        }
-        if (this.pendingReminder) {
-          const reminder = this.pendingReminder;
-          this.pendingReminder = null;
-          if (this.abortAfterInject) {
-            this.abortAfterInject = false;
-            this.messages.setErrorContent(PRE_ABORT_TEXT);
-            setTimeout(() => this.agent.abort(), 0);
-          }
-          additions.push({
-            role: "user",
-            content: reminder,
-            timestamp: Date.now(),
-          });
-        }
-        return [...messages, ...additions];
-      },
-      // Belt-and-braces: block any residual present-but-disallowed tool with
-      // the base reminder as the reason (blocked calls never reach afterToolCall).
-      beforeToolCall: async (ctx) => {
-        if (this.toolMode !== "read-only") return undefined;
-        if (this.readOnlyToolNames.has(ctx.toolCall.name)) return undefined;
-        return {
-          block: true,
-          reason: substituteTemplate(promptPack.laneReminders.base, {
-            tool: ctx.toolCall.name,
-          }),
-        };
-      },
-      // Layer 2: re-ground executed-but-failed read-only calls (never fires
-      // for blocked/absent tools). Not a violation — no escalation count.
-      afterToolCall: async (ctx) => {
-        if (this.toolMode !== "read-only" || !ctx.isError) return undefined;
-        const content = [...ctx.result.content];
-        if (!content.some((c) => c.type === "text" && c.text.includes("🚧"))) {
-          content.push({
-            type: "text",
-            text: promptPack.laneReminders.failedNote,
-          });
-        }
-        return { content };
-      },
-    });
-
-    this.agent.subscribe((e) => this.handleAgentEvent(e));
     this.messages = new SideChatMessages(theme, 20);
     // The whole forked batch (main-session context or reopened history) is
     // injected at open time: render it as one collapsed cite line, not as
@@ -668,6 +578,51 @@ export class SideChatOverlay implements Component, Focusable {
       { paddingX: 0 },
     );
     this.editor.onSubmit = (text) => this.handleSubmit(text);
+
+    // The runner (fork-turn.ts, issue #9) owns the fork agent and the whole
+    // turn loop — retry backoff, lane enforcement, Esc cancellation — and
+    // reports TurnPhase events the overlay renders. The overlay only
+    // assembles the deps: agent options (initial state: fork surgery +
+    // framing block + read-only tool list), the features-ANDed retry policy
+    // (D11), the prompt pack, the live lane closures, and the phase sink.
+    // `runnerFactory` is a test-only seam (default: one-line passthrough).
+    const runnerOptions: ForkTurnRunnerOptions = {
+      agentOptions: {
+        streamFn: streamSimple,
+        initialState: {
+          // Shared-prefix layout (#9): the MAIN persona stays in the system
+          // slot so the request head matches the main lane token-for-token.
+          systemPrompt: forkContext.systemPrompt,
+          model: forkContext.model,
+          thinkingLevel: forkContext.thinkingLevel,
+          tools: this.buildReadOnlyTools(),
+          messages: [...forkedMessages, framingMessage],
+        },
+        convertToLlm,
+        getApiKey: async (provider) => {
+          const key = await modelRegistry.getApiKeyForProvider(provider);
+          if (!key) throw new Error("No API key available");
+          return key;
+        },
+      },
+      // D11: the extension feature switch ANDs with pi's own
+      // `settings.retry.enabled` — either one off means a single attempt
+      // with zero backoff (runWithRetry's enabled=false path).
+      retryPolicy: {
+        ...options.retryPolicy,
+        enabled: options.features.retry && options.retryPolicy.enabled,
+      },
+      promptPack,
+      // Live closures: Ctrl+T toggles toolMode (the runner re-reads it per
+      // event); the read-only tool set is fixed at open time.
+      isReadOnlyLane: () => this.toolMode === "read-only",
+      isReadOnlyTool: (name) => this.readOnlyToolNames.has(name),
+      onPhase: (phase) => this.handlePhase(phase),
+    };
+    this.runner =
+      (options.runnerFactory ?? ((opts) => new ForkTurnRunner(opts)))(
+        runnerOptions,
+      );
   }
 
   private createPeekMainTool(sessionManager: SessionView): AgentTool {
@@ -753,35 +708,6 @@ export class SideChatOverlay implements Component, Focusable {
     ];
   }
 
-  /**
-   * 1st violation → base reminder; 2nd → escalated wording + turn abort.
-   * Texts come from the prompt pack (#13); the reminder is injected by
-   * transformContext before the next LLM call.
-   */
-  private registerLaneViolation(toolName: string) {
-    this.laneViolations += 1;
-    // Stop the spinner first: the lane-blocked status would otherwise be
-    // overwritten by the 80ms spinner tick.
-    this.stopSpinner();
-    if (this.laneViolations === 1) {
-      this.pendingReminder = substituteTemplate(
-        this.options.promptPack.laneReminders.base,
-        { tool: toolName },
-      );
-      this.messages.setToolStatus(LANE_BLOCKED_STATUS);
-    } else {
-      this.pendingReminder = substituteTemplate(
-        this.options.promptPack.laneReminders.escalated,
-        {
-          tool: toolName,
-          count: this.laneViolations,
-        },
-      );
-      this.abortAfterInject = true;
-      this.messages.setToolStatus(`${LANE_BLOCKED_STATUS} — escalating`);
-    }
-    this.options.tui.requestRender();
-  }
 
   private formatMessage(msg: AgentMessage): string {
     if (msg.role === "user") {
@@ -836,34 +762,7 @@ export class SideChatOverlay implements Component, Focusable {
     this.messages.setToolStatus("");
   }
 
-  /**
-   * Last assistant message in the fork transcript (pi's _findLastAssistantMessage
-   * semantics: includes aborted/error ones). The retry loop classifies this
-   * result after each attempt.
-   */
-  private lastAssistantMessage(): RetryableFailure | undefined {
-    const messages = this.agent.state.messages;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role === "assistant") return msg as RetryableFailure;
-    }
-    return undefined;
-  }
 
-  /**
-   * pi's _prepareRetry cleanup, mirrored: before a retry the failed assistant
-   * message is stripped from the transcript so the error never re-enters the
-   * next request (and agent.continue() can run — it requires a trailing
-   * user/toolResult message). Only an error-stop trailing message is removed;
-   * a successful prior turn's assistant message is left untouched.
-   */
-  private removeTrailingAssistantError(): void {
-    const messages = this.agent.state.messages;
-    const last = messages[messages.length - 1];
-    if (last?.role === "assistant" && last.stopReason === "error") {
-      this.agent.state.messages = messages.slice(0, -1);
-    }
-  }
 
   private stopRetryCountdown(): void {
     if (this.retryCountdown) {
@@ -873,23 +772,33 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
   /**
-   * Retry status line with a live countdown (D10), mirroring pi's
-   * RetryStatusIndicator wording: `Retrying (1/3) in 2s… (Esc to cancel)`.
-   * The spinner is stopped first so its 80ms tick cannot overwrite the status.
+   * Retry status line with a live countdown (D10), driven by the runner's
+   * `retry-wait` phase, mirroring pi's RetryStatusIndicator wording:
+   * `Retrying (1/3) in 2s… (Esc to cancel)`. The spinner is stopped first
+   * so its 80ms tick cannot overwrite the status. When the countdown
+   * reaches zero the backoff wait is over and the next attempt is starting:
+   * hand back to the spinner until the attempt's first phase takes over.
    */
-  private showRetryStatus(info: RetryAttemptInfo): void {
+  private startRetryCountdown(
+    info: Extract<TurnPhase, { kind: "retry-wait" }>,
+  ): void {
     this.stopSpinner();
     const startedAt = Date.now();
     const renderStatus = () => {
       const remaining = Math.max(0, info.delayMs - (Date.now() - startedAt));
+      if (remaining <= 0) {
+        this.stopRetryCountdown();
+        this.startSpinner();
+        return;
+      }
       const seconds = Math.ceil(remaining / 1000);
       this.messages.setToolStatus(
         `Retrying (${info.attempt}/${info.maxAttempts}) in ${seconds}s… (Esc to cancel)`,
       );
       this.options.tui.requestRender();
     };
-    renderStatus();
     this.retryCountdown = setInterval(renderStatus, 250);
+    renderStatus();
   }
 
   /**
@@ -901,9 +810,9 @@ export class SideChatOverlay implements Component, Focusable {
    * structure.
    */
   private refreshFramingModel(): void {
-    const modelId = this.agent.state.model?.id;
+    const modelId = this.runner.agent.state.model?.id;
     if (!modelId) return;
-    for (const message of this.agent.state.messages) {
+    for (const message of this.runner.agent.state.messages) {
       if (isFramingMessage(message) && typeof message.content === "string") {
         message.content = substituteTemplate(this.options.promptPack.framing, {
           cwd: this.options.forkContext.cwd,
@@ -913,14 +822,9 @@ export class SideChatOverlay implements Component, Focusable {
       }
     }
   }
-  private async handleSubmit(text: string) {
+  private handleSubmit(text: string): void {
     const trimmed = text.trim();
-    if (!trimmed || this.isStreaming || this.disposed) return;
-
-    // New user message: reset the per-turn lane counter.
-    this.laneViolations = 0;
-    this.pendingReminder = null;
-    this.abortAfterInject = false;
+    if (!trimmed || this.runner.isRunning || this.disposed) return;
 
     // Keep the framing block's `Model:` line in sync with the fork's current
     // model (Alt+M, D5): the text is substituted once at open time with the
@@ -929,112 +833,90 @@ export class SideChatOverlay implements Component, Focusable {
     this.refreshFramingModel();
 
     this.editor.setText("");
-    this.isStreaming = true;
     this.streamingContent = "";
     // A new user message resumes bottom-following even if the view was frozen.
     this.messages.resumeFollowing();
     this.messages.setStreamingContent("");
     this.messages.setErrorContent("");
     this.startSpinner();
-    // Per-turn retry cancellation (D9): Esc aborts this controller so the
-    // backoff wait stops and the last error surfaces as the final result.
-    this.retryAbortController = new AbortController();
-    const signal = this.retryAbortController.signal;
-
-    try {
-      // D9: wrap the turn in the injectable retry loop (issue #8). The first
-      // attempt submits the user text; a retryable failure is then stripped
-      // from the transcript (pi _prepareRetry semantics) and the agent
-      // continues from the same context — never re-submitting the user
-      // message and never feeding the failed message back into the request.
-      let firstAttempt = true;
-      const attempt = async (): Promise<RetryableFailure | undefined> => {
-        this.stopRetryCountdown();
-        if (!firstAttempt) {
-          this.removeTrailingAssistantError();
-          // A mid-stream failure may have streamed partial text: drop it so
-          // the retry starts clean (the error message itself is re-shown by
-          // the render path while we wait).
-          this.streamingContent = "";
-          this.messages.setStreamingContent("");
-          this.startSpinner();
-        }
-        if (firstAttempt) {
-          firstAttempt = false;
-          await this.agent.prompt(trimmed);
-        } else {
-          await this.agent.continue();
-        }
-        return this.lastAssistantMessage();
-      };
-      await runWithRetry({
-        attempt,
-        signal,
-        classify: (result) =>
-          classifyRetryable(
-            result as RetryableInput,
-            this.agent.state.model?.contextWindow ?? 0,
-          ),
-        onAttempt: (info) => this.showRetryStatus(info),
-        // D11: the extension feature switch ANDs with pi's own
-        // `settings.retry.enabled` — either one off means a single attempt
-        // with zero backoff (runWithRetry's enabled=false path).
-        policy: {
-          ...this.options.retryPolicy,
-          enabled:
-            this.options.features.retry && this.options.retryPolicy.enabled,
-        },
-      });
-    } catch (e) {
+    // The whole turn loop (attempts, retry backoff, lane enforcement, Esc
+    // cancellation) lives in the runner (fork-turn.ts, issue #9); the overlay
+    // renders its TurnPhase events. A thrown attempt (real abort) propagates
+    // out of run() — surface it as the final error line; the runner already
+    // emitted the final transcript + turn-end phases before rejecting.
+    void this.runner.run(trimmed).catch((error: unknown) => {
       this.streamingContent = "";
       if (!this.disposed) {
         this.messages.setErrorContent(
-          e instanceof Error ? e.message : "Unknown error",
+          error instanceof Error ? error.message : "Unknown error",
         );
+        this.options.tui.requestRender();
       }
-    } finally {
-      this.stopRetryCountdown();
-      this.retryAbortController = null;
-      this.isStreaming = false;
-      this.streamingContent = "";
-      this.stopSpinner();
-      this.messages.setStreamingContent("");
-      this.messages.setToolStatus("");
-      this.messages.setMessages([...this.agent.state.messages]);
-      if (!this.disposed) this.options.tui.requestRender();
-    }
+    });
   }
 
-  private handleAgentEvent(event: AgentEvent) {
+  /**
+   * TurnPhase dispatch (issue #9): the runner owns the turn loop and reports
+   * semantic phases; the overlay maps them onto the existing render surface —
+   * spinner, retry countdown ticker, status line and message batches — the
+   * same way the pre-runner agent events did.
+   */
+  private handlePhase(phase: TurnPhase): void {
     if (this.disposed) return;
-
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent?.type === "text_delta"
-    ) {
-      this.stopSpinner();
-      this.streamingContent += event.assistantMessageEvent.delta;
-      this.messages.setStreamingContent(this.streamingContent);
-    } else if (event.type === "message_end") {
-      this.messages.setMessages([...this.agent.state.messages]);
-      this.messages.setStreamingContent("");
-      this.streamingContent = "";
-    } else if (event.type === "tool_execution_start") {
-      this.stopSpinner();
-      this.messages.setToolStatus(`Running ${event.toolName}...`);
-    } else if (event.type === "tool_execution_end") {
-      this.startSpinner();
-      // Detection signal: an error result for a tool that is not in the
-      // read-only lane (absent tools produce "Tool X not found" errors).
-      if (
-        this.toolMode === "read-only" &&
-        event.isError &&
-        !this.readOnlyToolNames.has(event.toolName)
-      ) {
-        this.registerLaneViolation(event.toolName);
-      }
+    switch (phase.kind) {
+      case "stream":
+        // A text delta: an attempt is producing output — stop the spinner and
+        // any leftover countdown, accumulate into the streaming line.
+        this.stopRetryCountdown();
+        this.stopSpinner();
+        this.streamingContent += phase.delta;
+        this.messages.setStreamingContent(this.streamingContent);
+        break;
+      case "messages":
+        // Transcript snapshot (message_end or the final flush): render the
+        // batch and drop the streaming line.
+        this.stopRetryCountdown();
+        this.messages.setMessages(phase.messages);
+        this.messages.setStreamingContent("");
+        this.streamingContent = "";
+        break;
+      case "tool":
+        // Tool-call bookends: status line while the tool runs, spinner while
+        // the model thinks between calls.
+        this.stopRetryCountdown();
+        if (phase.state === "start") {
+          this.stopSpinner();
+          this.messages.setToolStatus(`Running ${phase.name}...`);
+        } else {
+          this.startSpinner();
+        }
+        break;
+      case "retry-wait":
+        // Backoff wait: the countdown ticker replaces the spinner.
+        this.startRetryCountdown(phase);
+        break;
+      case "lane":
+        // Out-of-lane detection (runner-owned): the blocked status replaces
+        // the spinner; the escalated violation also pre-renders the abort text.
+        this.stopSpinner();
+        this.messages.setToolStatus(
+          phase.escalated
+            ? `${LANE_BLOCKED_STATUS} — escalating`
+            : LANE_BLOCKED_STATUS,
+        );
+        if (phase.escalated) {
+          this.messages.setErrorContent(PRE_ABORT_TEXT);
+        }
+        break;
+      case "turn-end":
+        // The turn settled (success, budget exhaustion or Esc-cancel): clear
+        // the countdown, the spinner and the status line. The final transcript
+        // already rendered via the preceding messages phase.
+        this.stopRetryCountdown();
+        this.stopSpinner();
+        this.messages.setToolStatus("");
+        break;
     }
-
     this.options.tui.requestRender();
   }
 
@@ -1058,12 +940,12 @@ export class SideChatOverlay implements Component, Focusable {
       : theme.fg("warning", ` [↑${this.messages.getScrollOffset()}]`);
     // Header status shows the fork's current model (D10), mirroring the main
     // footer format: thinking level shown only when the model supports it.
-    const model = this.agent.state.model;
+    const model = this.runner.agent.state.model;
     const modelStatus = model
       ? model.reasoning
-        ? this.agent.state.thinkingLevel === "off"
+        ? this.runner.agent.state.thinkingLevel === "off"
           ? `[Model: ${model.id} • thinking off]`
-          : `[Model: ${model.id} • ${this.agent.state.thinkingLevel}]`
+          : `[Model: ${model.id} • ${this.runner.agent.state.thinkingLevel}]`
         : `[Model: ${model.id}]`
       : "[Model: ?]";
     const status =
@@ -1071,10 +953,10 @@ export class SideChatOverlay implements Component, Focusable {
       theme.fg("dim", modelStatus + " ") +
       theme.fg(modeColor, `[${modeLabel}]`) +
       scrollMark;
-    const stream = this.isStreaming ? theme.fg("warning", " ●") : "";
+    const stream = this.runner.isRunning ? theme.fg("warning", " ●") : "";
     const left = theme.fg("accent", title) + stream;
 
-    const escHint = this.isStreaming ? "Esc stop" : "Esc close";
+    const escHint = this.runner.isRunning ? "Esc stop" : "Esc close";
     const modeHint =
       this.toolMode === "read-only" ? "C+t Edit" : "C+t Readonly";
     const scrolled = !this.messages.isAtBottom();
@@ -1136,12 +1018,12 @@ export class SideChatOverlay implements Component, Focusable {
       return;
     }
     if (matchesKey(data, Key.escape)) {
-      if (this.isStreaming) {
+      if (this.runner.isRunning) {
         // Esc during the retry backoff cancels the wait (D9) so the last
         // error surfaces immediately; during an active stream it aborts the
-        // run as before. abort() on a waiting (non-running) agent is a no-op.
-        this.retryAbortController?.abort();
-        this.agent.abort();
+        // run as before. runner.cancel() aborts both; abort() on a waiting
+        // (non-running) agent is a no-op.
+        this.runner.cancel();
       } else {
         this.dispose();
       }
@@ -1180,7 +1062,7 @@ export class SideChatOverlay implements Component, Focusable {
       // Read-only lane keeps the strip philosophy; edit mode stays untouched
       // (enforcement out of scope until the crash bug is understood, #4).
       const { forkContext, tracker, onOverlapWarning } = this.options;
-      this.agent.state.tools =
+      this.runner.agent.state.tools =
         this.toolMode === "read-only"
           ? this.buildReadOnlyTools()
           : [
@@ -1214,7 +1096,7 @@ export class SideChatOverlay implements Component, Focusable {
     if (this.modelPicker) return;
     // Feature switch (D11): Alt+M is inert when model switching is off.
     if (!this.options.features.modelSwitch) return;
-    if (this.isStreaming) {
+    if (this.runner.isRunning) {
       this.messages.setToolStatus("Model switch unavailable while streaming");
       this.options.tui.requestRender();
       return;
@@ -1245,7 +1127,7 @@ export class SideChatOverlay implements Component, Focusable {
     );
     // Preselect the current fork model when it is on the list.
     const currentIndex = choices.findIndex(
-      (c) => modelKey(c.model) === modelKey(this.agent.state.model),
+      (c) => modelKey(c.model) === modelKey(this.runner.agent.state.model),
     );
     if (currentIndex >= 0) list.setSelectedIndex(currentIndex);
     list.onSelect = (item) => this.applyModelChoice(item);
@@ -1270,15 +1152,15 @@ export class SideChatOverlay implements Component, Focusable {
     // Explicit scoped thinking level ("model:high") overrides; otherwise keep
     // the current level and clamp it — non-reasoning models clamp to "off"
     // (pi maps "off" to no reasoning request).
-    const desired = choice.thinkingLevel ?? this.agent.state.thinkingLevel;
-    this.agent.state.model = model;
-    this.agent.state.thinkingLevel = clampThinkingLevelForModel(
+    const desired = choice.thinkingLevel ?? this.runner.agent.state.thinkingLevel;
+    this.runner.agent.state.model = model;
+    this.runner.agent.state.thinkingLevel = clampThinkingLevelForModel(
       model,
       desired,
     );
     this.messages.setToolStatus(
       `✓ Model: ${model.id}${
-        model.reasoning ? ` · ${this.agent.state.thinkingLevel}` : ""
+        model.reasoning ? ` · ${this.runner.agent.state.thinkingLevel}` : ""
       }`
     );
     this.options.tui.requestRender();
@@ -1314,13 +1196,13 @@ export class SideChatOverlay implements Component, Focusable {
   private exportChatHistory() {
     try {
       const path = exportChatHistoryToFile({
-        messages: [...this.agent.state.messages],
+        messages: [...this.runner.agent.state.messages],
         streamingContent: this.streamingContent,
         cwd: this.options.forkContext.cwd,
         modelId: this.options.forkContext.model.id,
         toolMode: this.toolMode,
         forkedMessageCount: this.forkedMessageCount,
-        streaming: this.isStreaming,
+        streaming: this.runner.isRunning,
       });
       // Status line feedback inside the overlay + a toast in the main session.
       this.stopSpinner();
@@ -1338,18 +1220,17 @@ export class SideChatOverlay implements Component, Focusable {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinner();
-    if (this.retryAbortController) {
-      // A pending retry wait must not outlive the overlay: abort it so the
-      // turn's handleSubmit settles and the countdown stops.
-      this.retryAbortController.abort();
-      this.stopRetryCountdown();
-    }
+    // A pending retry wait or in-flight stream must not outlive the overlay:
+    // cancel() aborts the runner's backoff controller and the agent run. The
+    // countdown is stopped here too — the runner's turn-end phase would do
+    // it, but handlePhase is a no-op once disposed.
+    this.stopRetryCountdown();
+    this.runner.cancel();
     if (this.transientClearTimer) {
       clearTimeout(this.transientClearTimer);
       this.transientClearTimer = null;
     }
-    const messages = [...this.agent.state.messages];
-    this.agent.abort();
+    const messages = [...this.runner.agent.state.messages];
     this.options.onClose(action, messages);
   }
 
