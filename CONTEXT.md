@@ -49,7 +49,11 @@ exponential backoff; context overflow and aborts never do.
 The `[paste #N +X lines]` / `[paste #N X chars]` placeholder the editor inserts for
 large pastes (>10 lines or >1000 chars), expanded back to full text at submit.
 
+**Pointer gesture**:
+The overlay's mouse interaction model — press/drag/double-click selection, wheel
+scroll, right-click copy and paste. The umbrella term over mouse selection.
+
 **Mouse selection**:
-The drag-selection in the chat area — left-drag anchors a range, double-click
-selects a line. The single source for hotkey copy (Ctrl+C / Ctrl+Shift+C) and
-right-click copy.
+The drag-selection gesture: left-drag anchors a range, double-click selects a
+line. One pointer gesture; the selection it leaves is the single source for
+hotkey copy (Ctrl+C / Ctrl+Shift+C) and right-click copy.

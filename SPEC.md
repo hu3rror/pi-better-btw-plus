@@ -96,3 +96,44 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
   - `AgentSession._isRetryableError`（overloaded / rate limit / server errors，context overflow 排除）与 `settings.retry` 结构（`enabled`/`maxRetries`/`baseDelayMs`）均在 pi 0.85.1 中确认存在。
   - bun 1.4.2 `mock.module` 局部覆盖模式（D13 原型）实测通过。
 - 术语与决策记录：`CONTEXT.md`（fork/refork、overlay、background、turn、lane、retry budget、paste marker、mouse selection）、`docs/adr/0001-turn-level-retry-in-fork.md`、`docs/adr/0002-fork-local-model-selection.md`。
+
+---
+
+# Spec: 抽取 PointerGesture 指针手势状态机模块
+
+> 状态：ready-for-agent。同步于 issue #12（grilling 收敛 → `/skill:to-spec`）。正文以 issue #12 为准，此处留档。术语以 `CONTEXT.md` 为准（新增 **pointer gesture** 伞形词，**mouse selection** 收敛为子概念）；不重开 ADR-0001 / ADR-0002。
+
+## Problem Statement
+
+侧聊 overlay 的指针手势识别（press/drag/双击/右键）是一台约 200 行的状态机，但被焊死在 1513 行的 `SideChatOverlay` 类里：9 个状态字段散落在字段列表中，双击判定、手抖容差、30fps 拖拽节流等语义被内联在 `handleMouseEvent` 的事件分支里。手势语义没有名字，接口 ≈ 实现复杂度。后果：测试成本高（`select.test.ts` 535 行，必须 mock 整个 TUI + 偷窥私有状态）、bug 修复点分散（双击分类两周内修过两次：`7e65ac4`、`bf6ac68`）、`index.ts` 内联位运算与 `isLeftPress()` 重复。
+
+## Solution
+
+把指针手势识别抽成独立的深模块 `pointer-gesture.ts`：模块消费原始 `SgrMouseEvent`（复用 `side-chat-mouse.ts` 分类函数），产出 `GestureAction[]` 动作对象；overlay 只保留「动作 → 渲染」翻译层；`index.ts` 内联聚焦判定替换为 `isLeftPress()`。外部行为零变化。
+
+## 关键决策（详见 issue #12）
+
+- **D1 模块形态**：动作对象类 `onEvent(e): GestureAction[]` / `isDragging()` / `cancel()`，单一依赖方向，模块零 TUI/剪贴板/编辑器知识。
+- **D2 动作集合**：`select`（含 `paint` 节流标志）/ `selectLine`（只带行号，列界由 overlay 补）/ `scroll` / `copy` / `paste`；copy 不携带选区文本（单一来源在 `SideChatMessages`）。
+- **D3 语义边界**：32ms 拖拽节流与滚轮步长进模块；双击窗口 500ms / 手抖容差（同行 ≤2 列）模块内常量；按下聚焦留 index.ts 路由层（只去重 `isLeftPress()`）。
+- **D4 hit 查询**：注入 `chatAt` / `clampToChat` / `overEditor` / `hasSelection` / `getSelectionAnchor` 五查询，0-based 坐标契约，SGR 1-based→0-based 转换在模块内。`getSelectionAnchor` 是硬约束：anchor 权威副本在 `SideChatMessages`（窗口平移同步移动）。
+- **D5 D11 门控**：`rightClickEnabled` 模块选项，关闭时右键 press 不记区域、release 不产动作。
+- **D6 翻译层**：overlay 私有 `applyGestureAction()`；模型选择器打开时的事件忽略 gate 留 overlay 层。
+- **D7 公开契约**：`handleMouseEvent` / `isMouseDragging` / `cancelMouseDrag` / `getViewport` 签名不变，内部委托模块。
+- **D8 依赖方向**：import `side-chat-mouse.ts` 分类函数 + `side-chat-messages.ts` 的 `CellPos` 类型（无循环）。
+
+## 测试决策（详见 issue #12）
+
+- 唯一新接缝：`test/pointer-gesture.test.ts`——喂 SGR 序列断言动作序列（双击窗口/手抖容差/跨行拖/clamp/跨区松手/D11 门控/cancel/拖拽中杂散右键/右键后滚轮）。
+- `select.test.ts` 瘦身留 4 个 overlay 层测试，其余 19 个手势测试删除（场景被模块单测覆盖）；`paste.test.ts` 与 `SideChatMessages` 段 6 个测试原样保留。
+- 抽取顺序：原样搬移（旧套件全绿作行为基线）→ index.ts 去重 → 新模块单测跑绿 → 瘦身。全程 `bun run typecheck` + `bun run test` 全绿。
+
+## Out of Scope
+
+- 修改 `SideChatMessages` 接口/内部；修改 index.ts 鼠标路由结构（只 1 行去重）；LayoutSpec（候选 3）、ForkTurnRunner / StatusChannel（候选 1/4）；新指针设备支持；TUI e2e 测试面；模型选择器与 retry 行为改动。
+
+## Further Notes
+
+- 实施顺序：抽取 → index.ts 去重 → `pointer-gesture.test.ts` → 瘦身 `select.test.ts`，每步一个 commit。
+- 术语已沉淀：CONTEXT.md 新增 **Pointer gesture**（伞形词），**Mouse selection** 收敛为子概念。
+- 不重开 ADR：与 ADR-0001 / ADR-0002 无交集。
