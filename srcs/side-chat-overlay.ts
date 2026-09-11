@@ -43,16 +43,7 @@ import {
   type ClipboardReadOutcome,
 } from "./clipboard-read.ts";
 import { exportChatHistoryToFile } from "./side-chat-export.ts";
-import {
-  isLeftDrag,
-  isLeftPress,
-  isLeftRelease,
-  isRightPress,
-  isRightRelease,
-  isWheelEvent,
-  type SgrMouseEvent,
-  wheelDirection,
-} from "./side-chat-mouse.ts";
+import { type SgrMouseEvent } from "./side-chat-mouse.ts";
 import {
   PointerGesture,
   type GestureAction,
