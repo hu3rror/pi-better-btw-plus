@@ -53,6 +53,10 @@ import {
   type SgrMouseEvent,
   wheelDirection,
 } from "./side-chat-mouse.ts";
+import {
+  PointerGesture,
+  type GestureAction,
+} from "./pointer-gesture.ts";
 import { substituteTemplate, type PromptPack } from "./prompt-pack.ts";
 import {
   isFramingMessage,
@@ -125,30 +129,6 @@ export const SIDE_CHAT_OVERLAY_MARGIN_TOP = 1;
 const SIDE_CHAT_OVERLAY_WIDTH = "85%";
 const SIDE_CHAT_OVERLAY_MARGIN_LEFT = 2;
 const SIDE_CHAT_OVERLAY_MARGIN_RIGHT = 2;
-/** Two quick presses within this window (same line) count as a double-click → select line. */
-const DOUBLE_CLICK_INTERVAL_MS = 500;
-
-/**
- * True when a drag release ended within the double-click tolerance (same
- * line, within a couple of cells). Real terminals report motion even for
- * 1-cell hand shake during a double-click, so a selection this small is a
- * click, not a drag — it must not suppress the next press's double-click
- * classification. Only the same line counts: a real cross-line drag of a
- * couple of cells stays a drag, never a click.
- */
-function selectionWithinClickTolerance(a: CellPos, b: CellPos): boolean {
-  return a.line === b.line && Math.abs(a.col - b.col) <= 2;
-}
-/** Wheel scroll step in lines (matches the previous mouse handler). */
-const WHEEL_SCROLL_LINES = 3;
-/**
- * Drag-render coalescing: mouse motion events fire per cell moved, and every
- * render redraws the whole frame (main screen + overlay). Capping drag
- * renders to ~30fps keeps the highlight fluid without saturating the event
- * loop on long drags. The selection state still updates on every event;
- * only the paint is throttled, and the release always paints the final look.
- */
-const DRAG_RENDER_INTERVAL_MS = 32;
 /** Feedback shown after a copy, cleared shortly after. */
 const COPIED_STATUS_PREFIX = "✓ Copied ";
 const COPIED_STATUS_CLEAR_MS = 1200;
@@ -219,20 +199,8 @@ export class SideChatOverlay implements Component, Focusable {
   private lastRenderHeight = 0;
   /** Geometry of the last render (screen coords), used for mouse hit-testing. */
   private geometry: ChatGeometry | null = null;
-  /** Mouse drag state: set while a left-button selection drag is in progress. */
-  private mouseDragging = false;
-  /** Right-press landed in the chat area; the copy action fires on release there. */
-  private rightPressInChat = false;
-  /** Right-press landed in the input editor; the paste action fires on release there. */
-  private rightPressInEditor = false;
-  private mouseAnchor: CellPos = { line: 0, col: 0 };
-  private lastPressTime = 0;
-  private lastPressPos: CellPos | null = null;
-  private pendingDoubleClick = false;
-  /** The last release ended a drag; a quick follow-up click must not count as a double-click. */
-  private lastReleaseWasDrag = false;
-  /** Timestamp of the last render triggered by a drag motion event (coalescing). */
-  private lastDragRenderAt = 0;
+  /** Pointer gesture state machine (spec #13): press/drag/double-click/right-click classification. */
+  private gesture: PointerGesture;
   /** Clears the current transient tool-status line (copy feedback / read-failed hint). */
   private transientClearTimer: NodeJS.Timeout | null = null;
   /** Leading messages injected from the main lane at fork time (context cite). */
@@ -284,7 +252,7 @@ export class SideChatOverlay implements Component, Focusable {
 
   /** True while a left-button drag is captured (events stay consumed even off-overlay). */
   isMouseDragging(): boolean {
-    return this.mouseDragging;
+    return this.gesture.isDragging();
   }
 
   /**
@@ -292,132 +260,55 @@ export class SideChatOverlay implements Component, Focusable {
    * overlay is hidden mid-drag and mouse reporting is turned off).
    */
   cancelMouseDrag(): void {
-    this.mouseDragging = false;
-    this.rightPressInChat = false;
-    this.rightPressInEditor = false;
-    this.pendingDoubleClick = false;
+    this.gesture.cancel();
     this.messages.clearSelection();
   }
 
   /**
    * Handle an SGR mouse event located over the overlay. Screen coordinates
-   * are 1-based (as reported by the terminal); the chat area is hit-tested
-   * against the geometry of the last render.
+   * are 1-based (as reported by the terminal); the gesture module converts
+   * them and produces actions, which {@link applyGestureAction} translates
+   * onto the message store and render loop.
    */
   handleMouseEvent(event: SgrMouseEvent): void {
-    // Modal model picker: pointer events are ignored until it closes.
+    // Modal model picker: pointer events are ignored until it closes. The
+    // gate stays at the overlay layer — the gesture module knows nothing
+    // about the modal (spec #13, D6).
     if (this.modelPicker) return;
-    if (isWheelEvent(event)) {
-      this.scrollByLines(wheelDirection(event) * WHEEL_SCROLL_LINES);
-      return;
+    for (const action of this.gesture.onEvent(event)) {
+      this.applyGestureAction(action);
     }
-    if (isLeftPress(event)) {
-      const pos = this.screenToChat(event.row - 1, event.col - 1);
-      if (!pos) return;
-      const now = Date.now();
-      const doubleClick =
-        this.lastPressPos !== null &&
-        !this.lastReleaseWasDrag &&
-        now - this.lastPressTime <= DOUBLE_CLICK_INTERVAL_MS &&
-        Math.abs(pos.line - this.lastPressPos.line) <= 1 &&
-        Math.abs(pos.col - this.lastPressPos.col) <= 2;
-      this.mouseDragging = true;
-      this.mouseAnchor = pos;
-      this.lastPressPos = pos;
-      this.lastPressTime = now;
-      this.pendingDoubleClick = doubleClick;
-      // Seed the selection with the anchor (empty range): the window-shift
-      // translation in render() then keeps the anchor aligned with the same
-      // content when status/stream lines are appended mid-drag.
-      this.messages.setSelection(pos, pos);
-      this.options.tui.requestRender();
-      return;
-    }
-    if (isLeftDrag(event)) {
-      if (!this.mouseDragging) return;
-      const pos = this.clampScreenToChat(event.row - 1, event.col - 1);
-      const anchor = this.messages.getSelectionAnchor() ?? this.mouseAnchor;
-      this.messages.setSelection(anchor, pos);
-      // Coalesce drag paints: the selection state is always current (the next
-      // render picks it up), only the number of full-frame redraws is capped.
-      const now = Date.now();
-      if (now - this.lastDragRenderAt >= DRAG_RENDER_INTERVAL_MS) {
-        this.lastDragRenderAt = now;
-        this.options.tui.requestRender();
-      }
-      return;
-    }
-    if (isLeftRelease(event)) {
-      if (!this.mouseDragging) return;
-      this.mouseDragging = false;
-      if (this.pendingDoubleClick) {
-        // Double-click: select the whole rendered line (no auto-copy; the
-        // hotkey copies it).
-        this.pendingDoubleClick = false;
-        this.lastReleaseWasDrag = false;
-        const pos = this.clampScreenToChat(event.row - 1, event.col - 1);
+  }
+
+  /**
+   * Translate a gesture action onto the message store + render loop (spec
+   * #13, D6). select always updates the selection; only paint:true actions
+   * request a re-render (the 32ms drag throttle lives in the module).
+   */
+  private applyGestureAction(action: GestureAction): void {
+    switch (action.kind) {
+      case "select":
+        this.messages.setSelection(action.anchor, action.focus);
+        if (action.paint) this.options.tui.requestRender();
+        break;
+      case "selectLine":
+        // Column bounds come from the overlay's own geometry; the module
+        // only knows the rendered line.
         this.messages.setSelection(
-          { line: pos.line, col: 0 },
-          { line: pos.line, col: this.geometry?.innerWidth ?? 0 },
+          { line: action.line, col: 0 },
+          { line: action.line, col: this.geometry?.innerWidth ?? 0 },
         );
         this.options.tui.requestRender();
-        return;
-      }
-      this.pendingDoubleClick = false;
-      const pos = this.clampScreenToChat(event.row - 1, event.col - 1);
-      if (this.messages.hasSelection()) {
-        // Drag-release: finalize the selection (the anchor may have been
-        // window-shifted by appended status/stream lines mid-drag). The
-        // selection stays highlighted so Ctrl+C copies it (hotkey-only copy).
-        const anchor = this.messages.getSelectionAnchor() ?? this.mouseAnchor;
-        this.messages.setSelection(anchor, pos);
-        // A selection that ends within the double-click tolerance is a click
-        // with hand shake, not a drag: real terminals report motion (button 32)
-        // even for 1-cell moves, so without this the tiniest movement while
-        // double-clicking marks the release as a drag and the second press is
-        // never classified as a double-click (bug: line-select never fires).
-        this.lastReleaseWasDrag = !selectionWithinClickTolerance(anchor, pos);
-      } else {
-        // Plain click without drag: no selection.
-        this.messages.clearSelection();
-        this.lastReleaseWasDrag = false;
-      }
-      this.options.tui.requestRender();
-    }
-    if (isRightPress(event)) {
-      // Track where the right press landed; the actual action fires on
-      // release, so a press-then-move-out-then-release does nothing. The
-      // feature switch (D11) disables both right-click branches entirely —
-      // an unrecorded press leaves the release branch a no-op.
-      if (this.options.features.rightClickCopyPaste) {
-        this.rightPressInChat =
-          this.screenToChat(event.row - 1, event.col - 1) !== null;
-        this.rightPressInEditor = this.isOverEditor(event.row - 1);
-      }
-      return;
-    }
-    if (isRightRelease(event)) {
-      // Right-click (release-triggered), one shared hit branch per D2: a
-      // press+release over the chat area with an active mouse selection
-      // copies it; a press+release over the input editor pastes the system
-      // clipboard. The release position decides — pressing in one area and
-      // releasing in the other does nothing, and a release elsewhere
-      // (header/border) is ignored.
-      const pressInChat = this.rightPressInChat;
-      const pressInEditor = this.rightPressInEditor;
-      this.rightPressInChat = false;
-      this.rightPressInEditor = false;
-      if (pressInChat) {
-        if (this.screenToChat(event.row - 1, event.col - 1) === null) return;
-        if (!this.messages.hasSelection()) return;
+        break;
+      case "scroll":
+        this.scrollByLines(action.lines);
+        break;
+      case "copy":
         void this.copySelectionToClipboard();
-        return;
-      }
-      if (pressInEditor) {
-        if (!this.isOverEditor(event.row - 1)) return;
+        break;
+      case "paste":
         void this.pasteFromClipboard();
-        return;
-      }
+        break;
     }
   }
 
@@ -578,6 +469,24 @@ export class SideChatOverlay implements Component, Focusable {
       { paddingX: 0 },
     );
     this.editor.onSubmit = (text) => this.handleSubmit(text);
+
+    // Pointer gesture state machine (spec #13): the module classifies raw
+    // SGR events into actions; the overlay translates them onto the message
+    // store and render loop (applyGestureAction). The hit queries bridge the
+    // module's 0-based screen coordinates to the overlay's geometry. The
+    // Alt+M modal gate stays in handleMouseEvent — the module knows nothing
+    // about the modal.
+    this.gesture = new PointerGesture({
+      hit: {
+        chatAt: (row, col) => this.screenToChat(row, col),
+        clampToChat: (row, col) => this.clampScreenToChat(row, col),
+        overEditor: (row, _col) => this.isOverEditor(row),
+        hasSelection: () => this.messages.hasSelection(),
+        getSelectionAnchor: () => this.messages.getSelectionAnchor(),
+      },
+      // D11: the feature switch gates right-click copy/paste at the module.
+      rightClickEnabled: this.options.features.rightClickCopyPaste,
+    });
 
     // The runner (fork-turn.ts, issue #9) owns the fork agent and the whole
     // turn loop — retry backoff, lane enforcement, Esc cancellation — and
