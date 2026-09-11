@@ -22,6 +22,7 @@ import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import {
   disableMouseReporting,
   enableMouseReporting,
+  isLeftPress,
   parseSgrMouseEvent,
 } from "./side-chat-mouse.ts";
 import { extractWritePaths } from "./tool-wrapper.ts";
@@ -116,11 +117,9 @@ export default function sideChatExtension(pi: ExtensionAPI) {
           // A press on the chat focuses the overlay, so the subsequent
           // Ctrl+C / Ctrl+Shift+C lands in the overlay (not the main editor)
           // and re-copies the selection.
-          if (
-            !event.isRelease &&
-            (event.button & 3) === 0 &&
-            (event.button & 32) === 0
-          ) {
+          // A press on the chat focuses the overlay (single classification
+          // source: isLeftPress, shared with the gesture module).
+          if (isLeftPress(event)) {
             overlayHandle?.focus();
           }
           overlay.handleMouseEvent(event);
