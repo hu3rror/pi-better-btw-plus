@@ -197,8 +197,9 @@ export class PointerGesture {
         this.lastReleaseWasDrag = !selectionWithinClickTolerance(anchor, pos);
         return [{ kind: "select", anchor, focus: pos, paint: true }];
       }
-      // Plain click without drag: the press-seeded empty selection is left
-      // for the overlay to clear on its own; no action.
+      // Plain click without drag: the press-seeded empty selection (anchor === focus)
+      // is inert (hasSelection() === false, no highlight rendered), so no explicit
+      // clear action is needed; left to be overwritten on the next press/scroll.
       this.lastReleaseWasDrag = false;
       return [];
     }
