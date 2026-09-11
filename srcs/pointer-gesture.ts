@@ -92,6 +92,8 @@ export interface PointerGestureOptions {
   rightClickEnabled?: boolean;
   /** Wheel scroll step in lines (default 3, matching the previous mouse handler). */
   wheelScrollLines?: number;
+  /** Clock for the double-click window and drag throttle (test seam; defaults to Date.now). */
+  now?: () => number;
 }
 
 /**
@@ -100,7 +102,7 @@ export interface PointerGestureOptions {
  * lives in the overlay, the module knows nothing about the modal).
  */
 export class PointerGesture {
-  /** Options with defaults already merged in (rightClickEnabled / wheelScrollLines). */
+  /** Options with defaults already merged in (rightClickEnabled / wheelScrollLines / now). */
   private readonly options: Required<PointerGestureOptions>;
   /** Set while a left-button selection drag is in progress. */
   private dragging = false;
@@ -121,6 +123,7 @@ export class PointerGesture {
     this.options = {
       rightClickEnabled: true,
       wheelScrollLines: 3,
+      now: () => Date.now(),
       ...options,
     };
   }
@@ -138,7 +141,7 @@ export class PointerGesture {
     if (isLeftPress(event)) {
       const pos = hit.chatAt(event.row - 1, event.col - 1);
       if (!pos) return [];
-      const now = Date.now();
+      const now = this.options.now();
       const doubleClick =
         this.lastPressPos !== null &&
         !this.lastReleaseWasDrag &&
@@ -162,7 +165,7 @@ export class PointerGesture {
       const anchor = hit.getSelectionAnchor() ?? this.mouseAnchor;
       // Coalesce drag paints: the selection state is always current (the next
       // render picks it up), only the number of full-frame redraws is capped.
-      const now = Date.now();
+      const now = this.options.now();
       const paint = now - this.lastDragRenderAt >= DRAG_RENDER_INTERVAL_MS;
       if (paint) this.lastDragRenderAt = now;
       return [{ kind: "select", anchor, focus: pos, paint }];
