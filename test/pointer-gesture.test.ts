@@ -361,5 +361,12 @@ describe("pointer-gesture.ts", () => {
     const [actions] = feed(gesture, fake, release(CHAT_COL, CHAT_ROW));
     expect(actions).toEqual([]);
     expect(gesture.isDragging()).toBe(false);
+    // A fresh press afterwards works normally: the stale release must not
+    // have swallowed the gesture stream.
+    const [rePress] = feed(gesture, fake, press(CHAT_COL, CHAT_ROW));
+    expect(rePress).toEqual([
+      { kind: "select", anchor: CHAT_CELL, focus: CHAT_CELL, paint: true },
+    ]);
+    expect(gesture.isDragging()).toBe(true);
   });
 });
