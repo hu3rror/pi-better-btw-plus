@@ -1,0 +1,47 @@
+# npm 发布工作流(Trusted Publisher / OIDC,零 token)
+# 模式 A(暂存流):CI 执行 npm stage publish 暂存包,维护者本地
+# `npm stage approve <stage-id>`(2FA)后才会真正发布到 npmjs。
+# 前置:npmjs.com 已为包配置 Trusted Publisher,绑定本仓库 + 本 workflow 文件名。
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*" # 仓库 tag 约定: vX.Y.Z,与 package.json version 一一对应
+
+permissions:
+  contents: read
+  id-token: write # Trusted Publishing(OIDC)必需;同时自动生成 provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest # 测试为纯 bun 单测(mock 注入),无 Windows 平台依赖
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24 # npm stage 需 npm 11+(Node 24 自带)
+          registry-url: https://registry.npmjs.org
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile # 项目用 bun 管理依赖(有 bun.lock,无 package-lock.json)
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag v${tag} does not match package.json version ${version}"
+            exit 1
+          fi
+
+      # 模式 A:暂存(不直接发布;stage-id 在日志中,维护者本地 approve)
+      - name: Stage package on npm registry
+        run: npm stage publish --provenance
