@@ -30,6 +30,11 @@ the terminal's native selection behavior.
 One user submit through to the agent's finished response. The unit the retry loop
 wraps, and the unit out-of-lane escalation can abort.
 
+**Attempt** (尝试):
+One agent run (prompt or continue) inside a turn. The unit the retry loop
+iterates over; a turn holds several attempts when transient provider errors
+retry. The retry countdown ("Retrying 1/3") counts attempts.
+
 **Lane**:
 The on-task frame the prompt pack defines for a fork. Out-of-lane attempts trigger
 lane reminders (base wording, then escalated), and two violations abort the turn.
