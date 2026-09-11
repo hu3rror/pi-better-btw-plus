@@ -14,10 +14,9 @@ import { loadConfig, loadRetryPolicy } from "./config.ts";
 import { getExtensionDir, loadPromptPack } from "./prompt-pack.ts";
 import {
   SideChatOverlay,
-  SIDE_CHAT_OVERLAY_MARGIN_TOP,
-  SIDE_CHAT_OVERLAY_MAX_HEIGHT,
   type ForkContext,
 } from "./side-chat-overlay.ts";
+import { LAYOUT } from "./overlay-layout.ts";
 import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import {
   disableMouseReporting,
@@ -327,13 +326,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
         },
         {
           overlay: true,
-          overlayOptions: {
-            width: "85%",
-            maxHeight: SIDE_CHAT_OVERLAY_MAX_HEIGHT,
-            anchor: "top-center",
-            margin: { top: SIDE_CHAT_OVERLAY_MARGIN_TOP, left: 2, right: 2 },
-            nonCapturing: true,
-          },
+          overlayOptions: { ...LAYOUT },
           onHandle: (handle) => {
             overlayHandle = handle;
             handle.focus();

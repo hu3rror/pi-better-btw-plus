@@ -57,3 +57,11 @@ scroll, right-click copy and paste. The umbrella term over mouse selection.
 The drag-selection gesture: left-drag anchors a range, double-click selects a
 line. One pointer gesture; the selection it leaves is the single source for
 hotkey copy (Ctrl+C / Ctrl+Shift+C) and right-click copy.
+
+**Overlay layout**:
+The arrangement of the overlay's on-screen regions (title bar, message area,
+input editor, hint bar). A single layout spec (`srcs/overlay-layout.ts` — the
+`LAYOUT` options object plus pure geometry functions) from which both rendering
+and mouse hit-testing derive, so they can never drift apart.
+Note: the geometry mirrors pi-tui's private `resolveOverlayLayout`; if pi ever
+exposes that resolver, swap the mirror for a call (see docs/adr/0004).

@@ -65,6 +65,13 @@ import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 import type { SideChatFeatures } from "./config.ts";
 import type { RetryPolicy } from "./retry.ts";
+import {
+  FRAME_SIDE_PADDING,
+  computeChatGeometry,
+  computeOverlayViewport,
+  computeSideChatHeight,
+  type ChatGeometry,
+} from "./overlay-layout.ts";
 export interface ForkContext {
   messages: AgentMessage[];
   model: Model<any>;
@@ -113,13 +120,6 @@ interface SideChatOverlayOptions {
   onExport: (path: string) => void;
 }
 
-/** Overlay max-height used for the side chat (adapted for small terminals at render time). */
-export const SIDE_CHAT_OVERLAY_MAX_HEIGHT = "88%";
-export const SIDE_CHAT_OVERLAY_MARGIN_TOP = 1;
-/** Overlay width (percent) and horizontal margins, matching index.ts overlayOptions. */
-const SIDE_CHAT_OVERLAY_WIDTH = "85%";
-const SIDE_CHAT_OVERLAY_MARGIN_LEFT = 2;
-const SIDE_CHAT_OVERLAY_MARGIN_RIGHT = 2;
 /** Feedback shown after a copy, cleared shortly after. */
 const COPIED_STATUS_PREFIX = "✓ Copied ";
 const COPIED_STATUS_CLEAR_MS = 1200;
@@ -128,35 +128,6 @@ const PASTE_FAILED_STATUS = "Clipboard read failed";
 /** Hint when the clipboard is readable but holds no text. */
 const PASTE_EMPTY_STATUS = "Clipboard is empty";
 const PASTE_STATUS_CLEAR_MS = 1200;
-
-/** Screen geometry of the overlay widgets (0-based terminal coordinates). */
-interface ChatGeometry {
-  /** Screen row of the first message line. */
-  msgTopRow: number;
-  /** Screen column of the first message cell (inside the left border). */
-  contentCol: number;
-  /** Message area width in cells. */
-  innerWidth: number;
-  /** Number of visible message lines. */
-  msgHeight: number;
-  /** Screen row of the input editor widget's top border. */
-  editorTopRow: number;
-  /** Height of the input editor widget in rows (border + content + border). */
-  editorHeight: number;
-}
-
-/**
- * Chat area height (message lines): 2.5x the original (~0.35 * rows - 10),
- * adapted to small terminals so the overlay never overflows the screen and
- * always leaves a few rows of the main editor visible.
- */
-export function computeSideChatHeight(rows: number): number {
-  const original = Math.max(3, Math.floor(rows * 0.35) - 10);
-  const desired = Math.round(original * 2.5);
-  // 7 fixed rows (borders, header, editor, hints) around the message area.
-  const overlayCap = Math.max(9, Math.min(Math.floor(rows * 0.88), rows - 4));
-  return Math.max(3, Math.min(desired, overlayCap - 7));
-}
 
 /**
  * Shared-prefix layout (#9, reverses decision #6): the main lane's system
@@ -205,33 +176,22 @@ export class SideChatOverlay implements Component, Focusable {
   /** Countdown ticker for the retry status line (cleared when the wait ends). */
   private retryCountdown: NodeJS.Timeout | null = null;
 
-  /**
-   * Chat area height (message lines): 2.5x the original (~0.35 * rows - 10),
-   * adapted to small terminals so the overlay never overflows the screen and
-   * always leaves a few rows of the main editor visible.
-   */
+  /** Chat area height (message lines): delegates to the shared layout module. */
   private computeChatHeight(): number {
     return computeSideChatHeight(this.options.tui.terminal.rows);
   }
 
   /**
    * Screen region occupied by the overlay (0-based rows), used to route mouse
-   * wheel events to the chat. Returns null when the overlay is gone.
+   * wheel events to the chat. Returns null when the overlay is gone. The
+   * maxHeight/percent/clamp math lives in the shared layout module.
    */
   getViewport(): { topRow: number; height: number } | null {
     if (this.disposed) return null;
-    const rows = this.options.tui.terminal.rows;
-    const maxHeight = Math.max(
-      1,
-      Math.min(
-        parsePercent(SIDE_CHAT_OVERLAY_MAX_HEIGHT, rows),
-        Math.max(1, rows - SIDE_CHAT_OVERLAY_MARGIN_TOP),
-      ),
+    return computeOverlayViewport(
+      this.options.tui.terminal.rows,
+      this.lastRenderHeight,
     );
-    return {
-      topRow: SIDE_CHAT_OVERLAY_MARGIN_TOP,
-      height: Math.min(this.lastRenderHeight, maxHeight),
-    };
   }
 
   /** Scroll the message area (positive = toward older content). Mouse wheel handler. */
@@ -826,7 +786,7 @@ export class SideChatOverlay implements Component, Focusable {
     }
 
     const { theme, tracker } = this.options;
-    const innerWidth = width - 4;
+    const innerWidth = width - FRAME_SIDE_PADDING * 2;
     const borderColor: ThemeColor = "border";
 
     const title = "Side Chat";
@@ -897,6 +857,7 @@ export class SideChatOverlay implements Component, Focusable {
     this.lastRenderHeight = lines.length;
     this.geometry = computeChatGeometry(
       this.options.tui.terminal.columns,
+      this.options.tui.terminal.rows,
       msgLines.length,
       editorLines.length,
     );
@@ -1138,48 +1099,6 @@ export class SideChatOverlay implements Component, Focusable {
     this.messages.invalidate();
     this.editor.invalidate();
   }
-}
-
-function parsePercent(value: string, reference: number): number {
-  const match = /^(\d+(?:\.\d+)?)%$/.exec(value);
-  if (!match) return reference;
-  return Math.floor((reference * parseFloat(match[1])) / 100);
-}
-
-/**
- * Screen geometry of the chat message area, mirroring the overlay layout
- * pi-tui computes from the side chat's overlayOptions (width 85%, anchor
- * top-center, margin { top: 1, left: 2, right: 2 }); see resolveOverlayLayout.
- * The overlay top row is pinned to marginTop, the message area starts after
- * the top border, header and separator (3 lines), and content cells begin
- * after the left border + padding (2 cells).
- */
-function computeChatGeometry(
-  termCols: number,
-  msgHeight: number,
-  editorHeight: number,
-): ChatGeometry {
-  const availWidth = Math.max(
-    1,
-    termCols - SIDE_CHAT_OVERLAY_MARGIN_LEFT - SIDE_CHAT_OVERLAY_MARGIN_RIGHT,
-  );
-  const width = Math.max(
-    1,
-    Math.min(parsePercent(SIDE_CHAT_OVERLAY_WIDTH, termCols), availWidth),
-  );
-  const leftCol =
-    SIDE_CHAT_OVERLAY_MARGIN_LEFT + Math.floor((availWidth - width) / 2);
-  const msgTopRow = SIDE_CHAT_OVERLAY_MARGIN_TOP + 3;
-  return {
-    msgTopRow,
-    contentCol: leftCol + 2,
-    innerWidth: width - 4,
-    msgHeight,
-    // Separator after the messages sits at msgTopRow + msgHeight; the
-    // input editor widget band starts on the next row.
-    editorTopRow: msgTopRow + msgHeight + 1,
-    editorHeight,
-  };
 }
 
 /**
