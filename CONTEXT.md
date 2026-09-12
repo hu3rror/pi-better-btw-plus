@@ -45,6 +45,13 @@ The `settings.retry` block (`enabled` / `maxRetries` / `baseDelayMs`) interprete
 as an auto-retry policy for fork turns: transient provider errors retry with
 exponential backoff; context overflow and aborts never do.
 
+**Tool status line**:
+The single feedback line under the conversation (`[Tool]: …`) showing turn
+state — the working spinner, the retry countdown, the lane-blocked notice,
+and transient toasts (copy confirmation, clipboard hints). One status
+channel owns all writers: steady states replace each other, transient
+toasts overlay the current state and fall back when they expire.
+
 **Paste marker**:
 The `[paste #N +X lines]` / `[paste #N X chars]` placeholder the editor inserts for
 large pastes (>10 lines or >1000 chars), expanded back to full text at submit.

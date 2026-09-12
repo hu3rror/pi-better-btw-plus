@@ -37,6 +37,9 @@ await import("./helpers/clipboard-mock.ts");
 const { copiedTexts, setCopyImplementation, resetCopyImplementation } =
   await import("./helpers/clipboard-mock.ts");
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
+// Spec issue #19 integration regression: drives a real submit through the
+// status channel, so ForkTurnRunner must load too (fake agent via runnerFactory).
+const { ForkTurnRunner } = await import("../srcs/fork-turn.ts");
 // Overlay harness: the constructor is passed in so the helper stays free of
 // a static overlay import (mock.module ordering is controlled here).
 const makeOverlay = (messages?: any[], overrides: Record<string, unknown> = {}) =>
@@ -229,5 +232,58 @@ describe("side-chat-overlay.ts", () => {
     expect(M.render(80).some((l: string) => l.includes("Copy failed"))).toBe(
       true,
     );
+  });
+
+  test("the copy flash survives spinner ticks during the thinking gap (spec #19 wart)", async () => {
+    // Fake agent whose prompt stalls until released: the submit starts a turn
+    // whose spinner steady-source keeps ticking on the status channel.
+    let releaseHeld: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseHeld = resolve;
+    });
+    const fake: any = {
+      state: { messages: [], model: { id: "test-model", contextWindow: 128000 } },
+      prompt: async (text: string) => {
+        fake.state.messages.push({ role: "user", content: text, timestamp: 1 });
+        await held;
+      },
+      continue: () => Promise.resolve(),
+      subscribe: () => () => {},
+      abort: () => {},
+    };
+    const overlay = makeOverlay(DEFAULT_MESSAGES, {
+      runnerFactory: (runnerOptions: any) =>
+        new ForkTurnRunner({
+          ...runnerOptions,
+          agentFactory: () => fake,
+        }),
+    });
+
+    // Submit: the runner is in flight (held), the spinner is the steady source.
+    overlay.handleInput("hi");
+    overlay.handleInput("\r");
+    await tick();
+
+    // Drag-select a range in the chat area and hotkey-copy it (flash 1200ms).
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    overlay.handleInput("\x03");
+    await tick();
+
+    const M: any = (overlay as any).messages;
+    expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
+    // Let ≥1 spinner tick (80ms interval) fire: the flash must still be shown.
+    // 150ms < full clearMs is deliberate: status-channel.test.ts already covers
+    // the complete 1200ms window on a fake clock, so this integration step only
+    // needs real timers to prove one spinner tick cannot clobber the flash —
+    // waiting the full 1200ms would slow the suite for no extra signal.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
+    expect(M.render(80).some((l: string) => l.includes("Working"))).toBe(false);
+    copiedTexts(); // consume the copy this test produced
+
+    releaseHeld(); // settle the turn so no orphan timers leak
+    await tick();
   });
 });

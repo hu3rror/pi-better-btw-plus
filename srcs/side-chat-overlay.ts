@@ -65,6 +65,7 @@ import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 import type { SideChatFeatures } from "./config.ts";
 import type { RetryPolicy } from "./retry.ts";
+import { StatusChannel, type SteadySourceOptions } from "./status-channel.ts";
 import {
   FRAME_SIDE_PADDING,
   computeChatGeometry,
@@ -151,20 +152,18 @@ export class SideChatOverlay implements Component, Focusable {
   private messages: SideChatMessages;
   private editor: Editor;
   private streamingContent = "";
+  /** Tool status line arbitration (spec issue #19): all `[Tool]: …` writers. */
+  private status: StatusChannel;
   private toolMode: "full" | "read-only" = "read-only";
   private _focused = true;
   private disposed = false;
   private forkLeafId: string | null;
   private peekMainTool: AgentTool;
-  private spinnerInterval: NodeJS.Timeout | null = null;
-  private spinnerFrame = 0;
   private lastRenderHeight = 0;
   /** Geometry of the last render (screen coords), used for mouse hit-testing. */
   private geometry: ChatGeometry | null = null;
   /** Pointer gesture state machine (spec #13): press/drag/double-click/right-click classification. */
   private gesture: PointerGesture;
-  /** Clears the current transient tool-status line (copy feedback / read-failed hint). */
-  private transientClearTimer: NodeJS.Timeout | null = null;
   /** Leading messages injected from the main lane at fork time (context cite). */
   private forkedMessageCount: number;
   /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
@@ -173,8 +172,6 @@ export class SideChatOverlay implements Component, Focusable {
   private modelPicker: SelectList | null = null;
   /** Choices backing the open picker (index-aligned with its SelectItems). */
   private modelPickerChoices: ModelChoice[] = [];
-  /** Countdown ticker for the retry status line (cleared when the wait ends). */
-  private retryCountdown: NodeJS.Timeout | null = null;
 
   /** Chat area height (message lines): delegates to the shared layout module. */
   private computeChatHeight(): number {
@@ -284,7 +281,7 @@ export class SideChatOverlay implements Component, Focusable {
       return false;
     }
     const status = `${COPIED_STATUS_PREFIX}${Array.from(text).length} chars`;
-    this.showTransientStatus(status, COPIED_STATUS_CLEAR_MS);
+    this.status.flash(status, COPIED_STATUS_CLEAR_MS);
     return true;
   }
 
@@ -308,7 +305,7 @@ export class SideChatOverlay implements Component, Focusable {
     if (!outcome.ok) {
       const status =
         outcome.reason === "empty" ? PASTE_EMPTY_STATUS : PASTE_FAILED_STATUS;
-      this.showTransientStatus(status, PASTE_STATUS_CLEAR_MS);
+      this.status.flash(status, PASTE_STATUS_CLEAR_MS);
       return;
     }
     // Bracketed paste is the only paste entry the Editor exposes (handlePaste
@@ -317,19 +314,6 @@ export class SideChatOverlay implements Component, Focusable {
     this.options.tui.requestRender();
   }
 
-  /**
-   * Show a tool-status line that clears itself after `clearMs`. Shared by
-   * the copy feedback and the clipboard-read hints.
-   */
-  private showTransientStatus(status: string, clearMs: number): void {
-    this.messages.setToolStatus(status);
-    this.options.tui.requestRender();
-    if (this.transientClearTimer) clearTimeout(this.transientClearTimer);
-    this.transientClearTimer = setTimeout(() => {
-      this.messages.clearToolStatusIf(status);
-      this.options.tui.requestRender();
-    }, clearMs);
-  }
 
   /** True when a screen row falls inside the input editor widget band. */
   private isOverEditor(row: number): boolean {
@@ -410,6 +394,16 @@ export class SideChatOverlay implements Component, Focusable {
     // full history. New messages appended after the fork render normally.
     // The framing block message is marked and skipped by the render path.
     this.messages.setInjectedMessageCount(forkedMessages.length);
+
+    // Tool status line arbitration (spec issue #19): every writer of the
+    // `[Tool]: …` line goes through this channel — steady sources replace
+    // each other, transient toasts flash over them and fall back on expiry.
+    this.status = new StatusChannel({
+      render: (text) => {
+        this.messages.setToolStatus(text);
+        this.options.tui.requestRender();
+      },
+    });
     this.messages.setMessages(forkedMessages);
     this.editor = new Editor(
       tui,
@@ -603,62 +597,12 @@ export class SideChatOverlay implements Component, Focusable {
     return "";
   }
 
-  private startSpinner() {
-    this.stopSpinner();
-    this.spinnerFrame = 0;
-    this.messages.setToolStatus(`${SPINNER[0]} Working...`);
-    this.options.tui.requestRender();
-    this.spinnerInterval = setInterval(() => {
-      this.spinnerFrame = (this.spinnerFrame + 1) % SPINNER.length;
-      this.messages.setToolStatus(`${SPINNER[this.spinnerFrame]} Working...`);
-      this.options.tui.requestRender();
-    }, 80);
-  }
-
-  private stopSpinner() {
-    if (!this.spinnerInterval) return;
-    clearInterval(this.spinnerInterval);
-    this.spinnerInterval = null;
-    this.messages.setToolStatus("");
-  }
-
-
-
-  private stopRetryCountdown(): void {
-    if (this.retryCountdown) {
-      clearInterval(this.retryCountdown);
-      this.retryCountdown = null;
-    }
-  }
-
-  /**
-   * Retry status line with a live countdown (D10), driven by the runner's
-   * `retry-wait` phase, mirroring pi's RetryStatusIndicator wording:
-   * `Retrying (1/3) in 2s… (Esc to cancel)`. The spinner is stopped first
-   * so its 80ms tick cannot overwrite the status. When the countdown
-   * reaches zero the backoff wait is over and the next attempt is starting:
-   * hand back to the spinner until the attempt's first phase takes over.
-   */
-  private startRetryCountdown(
-    info: Extract<TurnPhase, { kind: "retry-wait" }>,
-  ): void {
-    this.stopSpinner();
-    const startedAt = Date.now();
-    const renderStatus = () => {
-      const remaining = Math.max(0, info.delayMs - (Date.now() - startedAt));
-      if (remaining <= 0) {
-        this.stopRetryCountdown();
-        this.startSpinner();
-        return;
-      }
-      const seconds = Math.ceil(remaining / 1000);
-      this.messages.setToolStatus(
-        `Retrying (${info.attempt}/${info.maxAttempts}) in ${seconds}s… (Esc to cancel)`,
-      );
-      this.options.tui.requestRender();
+  /** Spinner steady source for the status channel (80ms tick, frame cycle). */
+  private spinnerSource(): SteadySourceOptions {
+    return {
+      tickMs: 80,
+      text: (frame) => `${SPINNER[frame % SPINNER.length]} Working...`,
     };
-    this.retryCountdown = setInterval(renderStatus, 250);
-    renderStatus();
   }
 
   /**
@@ -698,7 +642,7 @@ export class SideChatOverlay implements Component, Focusable {
     this.messages.resumeFollowing();
     this.messages.setStreamingContent("");
     this.messages.setErrorContent("");
-    this.startSpinner();
+    this.status.setSteady("spinner", this.spinnerSource());
     // The whole turn loop (attempts, retry backoff, lane enforcement, Esc
     // cancellation) lives in the runner (fork-turn.ts, issue #9); the overlay
     // renders its TurnPhase events. A thrown attempt (real abort) propagates
@@ -725,56 +669,66 @@ export class SideChatOverlay implements Component, Focusable {
     if (this.disposed) return;
     switch (phase.kind) {
       case "stream":
-        // A text delta: an attempt is producing output — stop the spinner and
-        // any leftover countdown, accumulate into the streaming line.
-        this.stopRetryCountdown();
-        this.stopSpinner();
+        // A text delta: an attempt is producing output. Let the status line
+        // rest (clear the steady source) so the streamed text is unobstructed;
+        // clearSteady keeps an in-flight flash (e.g. copy feedback).
+        this.status.clearSteady();
         this.streamingContent += phase.delta;
         this.messages.setStreamingContent(this.streamingContent);
         break;
       case "messages":
         // Transcript snapshot (message_end or the final flush): render the
         // batch and drop the streaming line.
-        this.stopRetryCountdown();
         this.messages.setMessages(phase.messages);
         this.messages.setStreamingContent("");
         this.streamingContent = "";
         break;
       case "tool":
-        // Tool-call bookends: status line while the tool runs, spinner while
-        // the model thinks between calls.
-        this.stopRetryCountdown();
+        // Tool-call bookends: steady "Running X" while the tool runs, the
+        // spinner while the model thinks between calls (setSteady replaces).
         if (phase.state === "start") {
-          this.stopSpinner();
-          this.messages.setToolStatus(`Running ${phase.name}...`);
+          this.status.setSteady("tool", {
+            text: () => `Running ${phase.name}...`,
+          });
         } else {
-          this.startSpinner();
+          this.status.setSteady("spinner", this.spinnerSource());
         }
         break;
       case "retry-wait":
-        // Backoff wait: the countdown ticker replaces the spinner.
-        this.startRetryCountdown(phase);
+        // Backoff wait: the countdown ticker replaces the spinner; when the
+        // wait elapses (expiresMs), the channel hands back to the spinner —
+        // the old manual "stop countdown → start spinner" choreography is
+        // gone. The countdown derives from the tick frame (frame × 250ms).
+        this.status.setSteady("retry", {
+          tickMs: 250,
+          text: (frame) => {
+            const remaining = Math.max(0, phase.delayMs - frame * 250);
+            const seconds = Math.ceil(remaining / 1000);
+            return `Retrying (${phase.attempt}/${phase.maxAttempts}) in ${seconds}s… (Esc to cancel)`;
+          },
+          expiresMs: phase.delayMs,
+          onExpired: () =>
+            this.status.setSteady("spinner", this.spinnerSource()),
+        });
         break;
       case "lane":
         // Out-of-lane detection (runner-owned): the blocked status replaces
-        // the spinner; the escalated violation also pre-renders the abort text.
-        this.stopSpinner();
-        this.messages.setToolStatus(
-          phase.escalated
-            ? `${LANE_BLOCKED_STATUS} — escalating`
-            : LANE_BLOCKED_STATUS,
-        );
+        // the steady source; the escalated violation pre-renders the abort text.
+        this.status.setSteady("lane", {
+          text: () =>
+            phase.escalated
+              ? `${LANE_BLOCKED_STATUS} — escalating`
+              : LANE_BLOCKED_STATUS,
+        });
         if (phase.escalated) {
           this.messages.setErrorContent(PRE_ABORT_TEXT);
         }
         break;
       case "turn-end":
-        // The turn settled (success, budget exhaustion or Esc-cancel): clear
-        // the countdown, the spinner and the status line. The final transcript
-        // already rendered via the preceding messages phase.
-        this.stopRetryCountdown();
-        this.stopSpinner();
-        this.messages.setToolStatus("");
+        // The turn settled (success, budget exhaustion or Esc-cancel): the
+        // status channel resets everything. The final transcript already
+        // rendered via the preceding messages phase.
+        this.status.reset();
         break;
     }
     this.options.tui.requestRender();
@@ -958,7 +912,9 @@ export class SideChatOverlay implements Component, Focusable {
     // Feature switch (D11): Alt+M is inert when model switching is off.
     if (!this.options.features.modelSwitch) return;
     if (this.runner.isRunning) {
-      this.messages.setToolStatus("Model switch unavailable while streaming");
+      this.status.setSteady("feedback", {
+        text: () => "Model switch unavailable while streaming",
+      });
       this.options.tui.requestRender();
       return;
     }
@@ -969,7 +925,7 @@ export class SideChatOverlay implements Component, Focusable {
       (model) => modelRegistry.hasConfiguredAuth?.(model) ?? false,
     );
     if (choices.length === 0) {
-      this.messages.setToolStatus("No authenticated models available");
+      this.status.setSteady("feedback", { text: () => "No authenticated models available" });
       this.options.tui.requestRender();
       return;
     }
@@ -1019,11 +975,14 @@ export class SideChatOverlay implements Component, Focusable {
       model,
       desired,
     );
-    this.messages.setToolStatus(
-      `✓ Model: ${model.id}${
-        model.reasoning ? ` · ${this.runner.agent.state.thinkingLevel}` : ""
-      }`
-    );
+    this.status.setSteady("feedback", {
+      text: () =>
+        `✓ Model: ${model.id}${
+          model.reasoning
+            ? ` · ${this.runner.agent.state.thinkingLevel}`
+            : ""
+        }`,
+    });
     this.options.tui.requestRender();
   }
 
@@ -1066,8 +1025,9 @@ export class SideChatOverlay implements Component, Focusable {
         streaming: this.runner.isRunning,
       });
       // Status line feedback inside the overlay + a toast in the main session.
-      this.stopSpinner();
-      this.messages.setToolStatus(`✓ exported → ${path}`);
+      this.status.setSteady("export", {
+        text: () => `✓ exported → ${path}`,
+      });
       this.options.onExport(path);
     } catch (error) {
       this.messages.setErrorContent(
@@ -1080,17 +1040,12 @@ export class SideChatOverlay implements Component, Focusable {
   dispose(action: "close" | "refork" | "clear" = "close") {
     if (this.disposed) return;
     this.disposed = true;
-    this.stopSpinner();
     // A pending retry wait or in-flight stream must not outlive the overlay:
-    // cancel() aborts the runner's backoff controller and the agent run. The
-    // countdown is stopped here too — the runner's turn-end phase would do
-    // it, but handlePhase is a no-op once disposed.
-    this.stopRetryCountdown();
+    // cancel() aborts the runner's backoff controller and the agent run; the
+    // status channel resets the line and its timers (the runner's turn-end
+    // phase would do it, but handlePhase is a no-op once disposed).
+    this.status.reset();
     this.runner.cancel();
-    if (this.transientClearTimer) {
-      clearTimeout(this.transientClearTimer);
-      this.transientClearTimer = null;
-    }
     const messages = [...this.runner.agent.state.messages];
     this.options.onClose(action, messages);
   }
