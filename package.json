@@ -1,6 +1,6 @@
 {
   "name": "pi-better-btw-plus",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "pi extension: /btw side-chat overlay — maintained fork of @yceachan/pi-better-btw (+ right-click copy/paste, fork model switch, turn-level retry)",
   "type": "module",
   "keywords": [
