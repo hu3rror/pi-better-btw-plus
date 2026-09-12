@@ -699,6 +699,13 @@ export class SideChatOverlay implements Component, Focusable {
         // wait elapses (expiresMs), the channel hands back to the spinner —
         // the old manual "stop countdown → start spinner" choreography is
         // gone. The countdown derives from the tick frame (frame × 250ms).
+        // A failed attempt may have streamed partial text without a message_end
+        // (transport-level failures cut the stream): drop it here, before the
+        // next attempt starts, so the retry never renders stale content
+        // stitched onto fresh output (mirrors the attempt-boundary cleanup
+        // the pre-runner wiring did).
+        this.streamingContent = "";
+        this.messages.setStreamingContent("");
         this.status.setSteady("retry", {
           tickMs: 250,
           text: (frame) => {

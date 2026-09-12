@@ -24,7 +24,7 @@ const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
 // --- Scripted fake agent ----------------------------------------------------
 
 type AgentBehavior =
-  | { kind: "fail"; errorMessage: string; partialText?: string }
+  | { kind: "fail"; errorMessage: string; partialText?: string; noMessageEnd?: boolean }
   | { kind: "succeed"; text?: string };
 
 /**
@@ -70,7 +70,7 @@ function makeFakeAgent(behaviors: AgentBehavior[]) {
         stopReason: "error",
         errorMessage: behavior.errorMessage,
       });
-      emit({ type: "message_end" });
+      if (!behavior.noMessageEnd) emit({ type: "message_end" });
     } else {
       state.messages.push({
         role: "assistant",
@@ -202,5 +202,27 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
 
     fake.releaseHeld();
     await tick();
+  });
+
+  test("a retry wait drops the failed attempt's partial text when no message_end arrives", async () => {
+    // Transport-level failures may cut the stream without a message_end; the
+    // retry wait must not keep rendering the stale partial text (mirrors the
+    // attempt-boundary cleanup the pre-runner wiring did).
+    const { overlay } = makeSmokeHarness(
+      [
+        { kind: "fail", errorMessage: "connection lost", partialText: "partial reply", noMessageEnd: true },
+        { kind: "succeed", text: "recovered" },
+      ],
+      { retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 600 } },
+    );
+
+    overlay.handleInput("hi");
+    overlay.handleInput("\r");
+    await tick();
+
+    // Retry wait is live: the countdown shows, and the stale partial text must not.
+    const waiting = frameText(overlay);
+    expect(waiting).toContain("Retrying (1/3)");
+    expect(waiting).not.toContain("[Assistant]: partial reply");
   });
 });
