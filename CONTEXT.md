@@ -44,9 +44,20 @@ lane reminders (base wording, then escalated), and two violations abort the turn
 _Avoid_: using "lane" as a synonym for the fork conversation itself
 
 **Retry budget**:
-The `settings.retry` block (`enabled` / `maxRetries` / `baseDelayMs`) interpreted
-as an auto-retry policy for fork turns: transient provider errors retry with
-exponential backoff; context overflow and aborts never do.
+The `settings.retry` turn-layer entry (`enabled` / `maxRetries` /
+`baseDelayMs`) interpreted as the fork's assistant-message auto-retry loop:
+transient provider errors retry with exponential backoff; context overflow
+and aborts never do. The HTTP-request layer above it is **Provider retry**.
+
+**Provider retry**:
+The `settings.retry.provider` block (`timeoutMs` / `maxRetries` /
+`maxRetryDelayMs`) interpreted as pi's HTTP-request-layer retry: the fork's
+stream function injects these into `streamSimple`, whose internal
+`retryProviderRequest` retries 429/408/409/5xx with exponential backoff +
+jitter, honors `Retry-After`, and is capped by `maxRetryDelayMs` — before any
+assistant message is produced, matching the main session. Unconfigured: the
+bare stream function passes through untouched (identity, zero overhead).
+Not gated by `features.retry` / `retry.enabled` — those stay turn-layer only.
 
 **Tool status line**:
 The single feedback line under the conversation (`[Tool]: …`) showing turn

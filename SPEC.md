@@ -180,6 +180,75 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 ## Further Notes
 
 - 实施顺序：契约测试先红（模块缺失）→ 模块落码（搬迁 + fd 修复）→ tool-wrapper 瘦身（-186 行）→ index.ts import 改指 → 全绿。
+
+---
+
+# Spec: fork 注入 pi provider 层重试（settings.retry.provider）
+
+> 状态：ready-for-agent。同步于 issue #20。由诊断会话（429 `insufficient_quota` 误判调查）经 grilling 收敛后落盘。术语与决策以 `CONTEXT.md`、`docs/adr/0001` 为准；实施时新开 `docs/adr/0005`。
+
+## Problem Statement
+
+侧聊（fork）遇到瞬时 provider 429 时直接报错，而 pi 主会话会先重试。
+
+手动复现：请求触发 `[Error]: 429: {"message":"inference exceeds tpm/rpm limit","type":"rate_limit_error","code":"insufficient_quota"}` 后，fork 直接显示最终错误；同一请求在主会话按 `settings.retry.provider.maxRetries`（本机 15 次）在 HTTP 层先重试，通常直接成功，错误根本不出现。
+
+## Solution
+
+fork 的 turn 装配补上与 pi 主会话一致的 **provider 层重试**：读取 `settings.retry.provider`（`timeoutMs` / `maxRetries` / `maxRetryDelayMs`），注入到 fork agent 的流式装配，使 `streamSimple` 内部 pi 自带的 HTTP 重试（`retryProviderRequest`：429/408/409/5xx 指数退避+抖动，尊重 `Retry-After`，受 `maxRetryDelayMs` 上限约束）在 assistant message 产生之前生效。两层层级与主会话一致：provider 层（HTTP 请求层）→ turn 层（assistant error message 分类层，fork 已镜像实现、**一行不动**）。
+
+## User Stories
+
+1. 作为侧聊用户，我想 fork 遇到瞬时 provider 429（如 tpm/rpm limit）时先在 HTTP 层自动重试，以便与主会话行为一致，而不是直接看到最终错误。
+2. 作为侧聊用户，我想 fork 的重试遵守 `settings.retry.provider.maxRetries`，以便限流窗口内能自动恢复。
+3. 作为侧聊用户，我想 fork 的重试遵守 `settings.retry.provider.maxRetryDelayMs`，以便服务器要求的超长退避不超过我的上限（默认 60s）。
+4. 作为侧聊用户，我想 fork 尊重服务器 `Retry-After` 指示，以便不过度请求、退避节奏与服务端一致。
+5. 作为侧聊用户，我想 fork 未配置 `settings.retry.provider` 时行为与现状完全一致（零开销、单次请求），以便不配置的用户无感知。
+6. 作为侧聊用户，我想 fork 的 turn 层重试语义保持现状（`enabled/maxRetries/baseDelayMs` 与分类表不变），以便已有重试行为不被破坏。
+7. 作为侧聊用户，我想 `features.retry` 开关继续只管 turn 层循环，以便与主会话的 provider 层行为（不读该开关）保持一致。
+8. 作为侧聊用户，我想调用方（fork 自身/未来其它装配者）显式传入的 `maxRetries`/`maxRetryDelayMs`/`timeoutMs` 优先于 settings，以便不覆盖更具体的调用方意图。
+9. 作为侧聊用户，我想 `insufficient_quota` 出现在 `rate_limit_error` 报文里的 429 由 HTTP 层重试消化，以便不被计费式误判直接终结（分类器不动）。
+10. 作为维护者，我想 fork 的重试栈与 pi 主会话一致（provider 层在前、turn 层在后），以便侧聊与主会话的故障恢复行为可预期对齐。
+11. 作为维护者，我想实现不 deep-import pi 内部模块、不本地移植重试算法，以便不绑定宿主内部路径、不产生双份退避算法漂移。
+12. 作为维护者，我想术语区分两层重试（Retry budget= turn 层 / Provider retry = HTTP 层），以便文档与讨论无歧义。
+
+## Implementation Decisions
+
+- **D1（复用机制 = 注入，非移植非显式调用）**：新增一个纯装配 helper，对 fork 的流式函数做 options 注入：`{ ...options, timeoutMs, maxRetries, maxRetryDelayMs }`（缺省键回退 `options?.X ?? settings.X`）。重试循环并不由该 helper 实现——`streamSimple` 内部已用 pi 的 `retryProviderRequest` 包住 SDK 调用并消费 `options.maxRetries` / `options.maxRetryDelayMs`（0.85.1 运行时与 0.84.2 devDeps 均已核实），因此注入即是复用 pi 的 util。不 deep import `@earendil-works/pi-ai/dist/utils/provider-retry.js`（非公开导出，版本脆弱），不本地移植退避算法。装配位置即今日 `streamFn` 直连 `streamSimple` 之处（overlay 组装 agent options 处）。
+- **D2（注入键范围）**：`timeoutMs` + `maxRetries` + `maxRetryDelayMs` 三键全部注入（镜像 pi-coding-agent `sdk.js` 的 streamFn 注入链）。`httpIdleTimeoutMs`（另一 settings 键）不纳入。
+- **D3（零开销恒等）**：`provider` 块缺失/无可注入键时，helper 原样返回原流式函数（恒等），未配置行为与现状字节级一致。
+- **D4（配置管道）**：`RetryPolicy` 增加可选 `provider?: { timeoutMs?; maxRetries?; maxRetryDelayMs? }` 块，`loadRetryPolicy` 在既有 global+project `settings.retry` 合并结果上提取（缺失键落空，与 pi `getProviderRetrySettings` 同源同语义）。加载侧不默认 `maxRetryDelayMs`——pi-ai 内部对缺省值有 60000 兜底，行为一致。turn 层循环（`runWithRetry`）只读 `enabled/maxRetries/baseDelayMs`，`provider` 块仅由 overlay 的流式装配消费。
+- **D5（门控）**：provider 层重试不与 `features.retry`、`settings.retry.enabled` 门控——逐行镜像 pi 主会话（其 provider 层不读这两个开关）。D11 开关继续只管扩展自研的 turn 层循环。
+- **D6（分类器一行不动）**：`retry.ts` 分类表与 `isRetryableAssistantError` 镜像保持。已核实 pi 自身对该报文同样判不可重试（两表字节一致），因此 provider 层是行为对齐边界，不在分类层引入偏离。
+- **D7（时序）**：provider 层（HTTP 请求层，assistant message 之前）→ 耗尽后进入 turn 层（分类 assistant error message）→ 耗尽后展示最终错误。两层串行，与主会话一致。
+- **D8（文档）**：`CONTEXT.md` 词条更新——**Retry budget** 收窄为 turn 层（`enabled/maxRetries/baseDelayMs`），新增 **Provider retry** 词条（`settings.retry.provider`：HTTP 请求层重试 429/408/409/5xx，尊重 Retry-After，指数退避+抖动，在 assistant message 产生前执行）。新开 **ADR-0005**：两层重试栈、为何注入而非移植/显式调用、为何分类器不动、为何不重开 ADR-0001（其否决的是「用 provider retry *替代* turn 层」，非「并存第一层」）。
+
+## Testing Decisions
+
+- **测试原则**：只测外部行为与装配契约，不断言 pi-ai 内部行为（避免版本耦合）。本 bug 的调用点是 overlay 组装 `agentOptions.streamFn`——最高可测 seam 即 overlay 的 `runnerFactory` 捕获 seam。
+- **核心 seam（1 个）**：overlay 装配 seam——经 `runnerFactory` 捕获 `runnerOptions`，断言：配置 `provider` 块时 `agentOptions.streamFn` 不再是裸流式函数（被包装）；未配置时是原样流式函数（恒等）。此断言在现状代码上红。
+- **新单元 seam**：注入 helper 的 options 语义——缺省键被注入、调用方显式 options 优先、其余键透传、返回值透传、无配置恒等。prior art：`retry.test.ts` 的注入式假 agent / 假时钟。
+- **既有 seam 复用**：配置解析 seam——`provider` 块提取、global+project 深合并、缺失键落空。prior art：`config.test.ts` 的临时目录树注入模式。
+- **不做**：真实 429 端到端（无打点，成本不成比例）；0.84.2 `streamSimple` 内部行为断言。端到端回归由用户本机手动复现（`provider.maxRetries=15` 已配）。
+
+## Out of Scope
+
+- 分类器改动（`retry.ts` 镜像保持，一行不动）。
+- `httpIdleTimeoutMs` / WebSocket 超时接线。
+- provider 层重试与 `features.retry` / `retry.enabled` 的门控语义变更（按 D5 不门控）。
+- UI 编辑 `settings.retry`（只读遵循 pi 的配置，沿用既有结论）。
+- compaction 或其它 AgentSession 层能力。
+- TUI e2e 自动化测试面。
+- 对「`rate_limit_error` 类型 + `insufficient_quota` 码」的 turn 层分类器特判（属于 pi-ai 上游语义，不在 fork 内发明私有协议）。
+
+## Further Notes
+
+- **已核实事实（实现引用，不再猜测）**：
+  - pi 0.85.1 `sdk.js` 的 streamFn wrapper 注入链：`maxRetries: options?.maxRetries ?? providerSettings.maxRetries`，同链含 `timeoutMs` / `maxRetryDelayMs`；provider 设置来自 `settingsManager.getProviderRetrySettings()`（=`settings.retry.provider`，maxRetryDelayMs 缺省 60000）。
+  - `retryProviderRequest` 非 pi-ai 公开导出（root/compat 均无），但在 `streamSimple` 内部被各 OpenAI 系 stream 模块使用并消费 `options.maxRetries` / `options.maxRetryDelayMs`（0.85.1 与 0.84.2 均已核实）。
+  - pi 的 `isRetryableAssistantError` 对 `429: {"message":...,"code":"insufficient_quota"}` 报文同样返回不可重试（非重试表先短路）；两表与 fork 的 `retry.ts` 字节一致 → 分类器不是行为偏差点。
+  - bun `toEqual` 忽略 undefined 属性 → `RetryPolicy` 加可选 `provider` 不破坏既有配置测试断言。
+- **验证缺口**：真实 429 端到端回归需用户本机手动复现（触发 tpm/rpm limit 后观察 HTTP 层重试与最终恢复）。
 - Review 机械项已清理：三新/改文件补齐尾随换行（对齐仓库 LF 约定）；`TWO_CHAR_OPS` 删不可达 `"&>>"` 死键。
 - 术语已沉淀：CONTEXT.md 新增 **File overlap**。
 - 待办：backlog issue 创建（`gh issue create --label needs-triage`，网络恢复后执行，body 就绪于 `%TEMP%\issue-body.md`）。

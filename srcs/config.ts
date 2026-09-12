@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { PromptPackManifest } from "./prompt-pack.ts";
+import { PROVIDER_RETRY_KEYS, type ProviderRetrySettings } from "./provider-retry.ts";
 import type { RetryPolicy } from "./retry.ts";
 /**
  * Layered config resolution for pi-better-btw.
@@ -70,8 +71,11 @@ export const AGENT_CONFIG_DIR = join(homedir(), ".pi", "agent");
  * with project <cwd>/.pi/settings.json (project wins per key, mirroring pi's
  * deepMergeSettings), then the `retry` block is extracted with pi's defaults
  * (settingsManager.getRetrySettings: enabled=true, maxRetries=3,
- * baseDelayMs=2000). Invalid/absent files contribute nothing; a present-but-
- * unreadable file warns instead of failing the fork.
+ * baseDelayMs=2000). The `retry.provider` block (spec #20 D4: timeoutMs /
+ * maxRetries / maxRetryDelayMs — HTTP-layer retry knobs) is extracted too,
+ * with only defined number keys kept; it is consumed solely by the overlay's
+ * stream assembly, never by the turn loop. Invalid/absent files contribute
+ * nothing; a present-but-unreadable file warns instead of failing the fork.
  */
 export interface LoadRetryPolicyOptions {
   /** Agent config dir holding pi's global settings.json (~/.pi/agent). */
@@ -125,6 +129,15 @@ export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPoli
       : {},
   );
   const retry = isPlainRecord(merged.retry) ? merged.retry : {};
+  // D4 (spec #20): extract the provider block (HTTP-layer retry knobs)
+  // from the already-global+project-merged settings. Only defined number
+  // keys are kept; missing keys fall empty — no maxRetryDelayMs default
+  // here, because pi-ai's streamSimple defaults it to 60000 internally.
+  const provider = isPlainRecord(retry.provider) ? retry.provider : {};
+  const providerSettings: ProviderRetrySettings = {};
+  for (const key of PROVIDER_RETRY_KEYS) {
+    if (typeof provider[key] === "number") providerSettings[key] = provider[key];
+  }
   return {
     enabled:
       typeof retry.enabled === "boolean" ? retry.enabled : true,
@@ -132,6 +145,9 @@ export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPoli
       typeof retry.maxRetries === "number" ? retry.maxRetries : 3,
     baseDelayMs:
       typeof retry.baseDelayMs === "number" ? retry.baseDelayMs : 2000,
+    ...(Object.keys(providerSettings).length > 0
+      ? { provider: providerSettings }
+      : {}),
   };
 }
 

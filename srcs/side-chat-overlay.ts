@@ -49,6 +49,7 @@ import {
   type GestureAction,
 } from "./pointer-gesture.ts";
 import { substituteTemplate, type PromptPack } from "./prompt-pack.ts";
+import { injectProviderRetry } from "./provider-retry.ts";
 import {
   isFramingMessage,
   markFramingMessage,
@@ -98,7 +99,9 @@ interface SideChatOverlayOptions {
   promptPack: PromptPack;
   /** Extension tools allowed in read-only mode (config.json, git-untracked). */
   readOnlyExtensionAllowlist: string[];
-  /** `settings.retry` budget/backoff read from pi's settings files (D8). */
+  /** `settings.retry` budget/backoff read from pi's settings files (D8). The
+   * optional `provider` block is consumed here by the stream assembly
+   * (provider-layer retry, spec #20); the turn loop only sees the budget. */
   retryPolicy: RetryPolicy;
   /** Per-feature kill switches resolved from the layered config (D11). */
   features: SideChatFeatures;
@@ -437,12 +440,15 @@ export class SideChatOverlay implements Component, Focusable {
     // turn loop — retry backoff, lane enforcement, Esc cancellation — and
     // reports TurnPhase events the overlay renders. The overlay only
     // assembles the deps: agent options (initial state: fork surgery +
-    // framing block + read-only tool list), the features-ANDed retry policy
-    // (D11), the prompt pack, the live lane closures, and the phase sink.
+    // framing block + read-only tool list, streamFn wrapped with pi's
+    // provider-layer retry settings — spec #20 D5: NOT gated by
+    // features.retry / retry.enabled, mirroring the main session), the
+    // features-ANDed retry policy (D11), the prompt pack, the live lane
+    // closures, and the phase sink.
     // `runnerFactory` is a test-only seam (default: one-line passthrough).
     const runnerOptions: ForkTurnRunnerOptions = {
       agentOptions: {
-        streamFn: streamSimple,
+        streamFn: injectProviderRetry(streamSimple, options.retryPolicy.provider),
         initialState: {
           // Shared-prefix layout (#9): the MAIN persona stays in the system
           // slot so the request head matches the main lane token-for-token.

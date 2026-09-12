@@ -374,6 +374,89 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
       tree.cleanup();
     }
   });
+
+  test("provider block is extracted (timeoutMs/maxRetries/maxRetryDelayMs)", () => {
+    const tree = makeRetryTree({
+      global: {
+        retry: {
+          enabled: true,
+          maxRetries: 8,
+          provider: { timeoutMs: 5000, maxRetries: 15, maxRetryDelayMs: 30000 },
+        },
+      },
+    });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 8,
+        baseDelayMs: 2000,
+        provider: { timeoutMs: 5000, maxRetries: 15, maxRetryDelayMs: 30000 },
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("provider block deep-merges global+project per key (project wins)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { provider: { timeoutMs: 5000, maxRetries: 15 } } },
+      project: { retry: { provider: { maxRetries: 2, maxRetryDelayMs: 60000 } } },
+    });
+    try {
+      expect(tree.load().provider).toEqual({
+        timeoutMs: 5000,
+        maxRetries: 2,
+        maxRetryDelayMs: 60000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("missing provider keys fall empty (only defined keys present)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { provider: { maxRetries: 15 } } },
+    });
+    try {
+      const policy = tree.load();
+      expect(policy.provider).toEqual({ maxRetries: 15 });
+      expect(policy.provider?.timeoutMs).toBeUndefined();
+      expect(policy.provider?.maxRetryDelayMs).toBeUndefined();
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("no provider block anywhere: provider stays undefined", () => {
+    const tree = makeRetryTree({
+      global: { retry: { enabled: true, maxRetries: 3 } },
+    });
+    try {
+      expect(tree.load().provider).toBeUndefined();
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("non-object provider block falls back to undefined", () => {
+    const tree = makeRetryTree({ global: { retry: { provider: "disabled" } } });
+    try {
+      expect(tree.load().provider).toBeUndefined();
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("non-number provider keys are skipped", () => {
+    const tree = makeRetryTree({
+      global: { retry: { provider: { maxRetries: "15", timeoutMs: 1000 } } },
+    });
+    try {
+      expect(tree.load().provider).toEqual({ timeoutMs: 1000 });
+    } finally {
+      tree.cleanup();
+    }
+  });
 });
 
 /**

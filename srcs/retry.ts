@@ -14,6 +14,8 @@
  * attempt results) and a fake clock (recorded delays); the engine itself has
  * no overlay / TUI / pi-runtime dependency.
  */
+import type { ProviderRetrySettings } from "./provider-retry.ts";
+
 /** Assistant-message-shaped failure the classifier accepts (pi's message shape). */
 export interface RetryableFailure {
   stopReason?: string;
@@ -225,6 +227,13 @@ export interface RetryPolicy {
   enabled: boolean;
   maxRetries: number;
   baseDelayMs: number;
+  /**
+   * HTTP-layer retry knobs (`settings.retry.provider`, spec #20 D4): consumed
+   * only by the overlay's stream assembly (injectProviderRetry) — pi's
+   * streamSimple retries at the request layer before any assistant message
+   * exists. The turn loop (runWithRetry) never reads this block.
+   */
+  provider?: ProviderRetrySettings;
 }
 
 /** Status payload for `onAttempt`, emitted before each backoff wait. */
