@@ -16,6 +16,15 @@
  * only inputs are texts and frame numbers. UI copy stays in the overlay;
  * the channel only decides *what* is displayed at any moment.
  */
+/** Steady-source identity: a closed set, so a typo'd id ('spiner') is a compile error. */
+export type SteadySourceId =
+  | "spinner"
+  | "retry"
+  | "tool"
+  | "lane"
+  | "feedback"
+  | "export";
+
 export interface SteadySourceOptions {
   /** Re-evaluate `text` every this many ms (spinner 80 / countdown 250). */
   tickMs?: number;
@@ -46,7 +55,7 @@ export interface StatusChannelOptions extends Partial<StatusScheduler> {
 }
 
 interface SteadyState {
-  id: string;
+  id: SteadySourceId;
   opts: SteadySourceOptions;
   frame: number;
   startedAt: number;
@@ -76,7 +85,7 @@ export class StatusChannel {
    * replacing a ticked source stops its ticker. `expiresMs` is checked on
    * every tick only — a source without `tickMs` never expires.
    */
-  setSteady(id: string, source: SteadySourceOptions): void {
+  setSteady(id: SteadySourceId, source: SteadySourceOptions): void {
     this.stopSteadyTimer();
     this.steady = { id, opts: source, frame: 0, startedAt: this.options.now() };
     if (source.tickMs !== undefined) {
