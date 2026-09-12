@@ -24,7 +24,7 @@ import {
   isLeftPress,
   parseSgrMouseEvent,
 } from "./side-chat-mouse.ts";
-import { extractWritePaths } from "./tool-wrapper.ts";
+import { extractWritePaths } from "./write-paths.ts";
 // Patch to capture the runner instance for extension tool access in side chat.
 let capturedRunner: ExtensionRunner | null = null;
 // Patch once (module reloads re-execute this file; re-patching would nest the

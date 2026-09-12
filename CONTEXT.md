@@ -35,6 +35,9 @@ One agent run (prompt or continue) inside a turn. The unit the retry loop
 iterates over; a turn holds several attempts when transient provider errors
 retry. The retry countdown ("Retrying 1/3") counts attempts.
 
+**File overlap**:
+Files the main session has written during this fork's lifetime (tracked from its tool executions). The fork's full lane guards these: a write hitting an overlapped path passes a confirm prompt before it runs. The read-only lane never reaches the guard — the strip philosophy removes the write tools entirely.
+_Avoid_: calling it "conflict"/"merge" — no merge happens, only a pre-write confirmation.
 **Lane**:
 The on-task frame the prompt pack defines for a fork. Out-of-lane attempts trigger
 lane reminders (base wording, then escalated), and two violations abort the turn.

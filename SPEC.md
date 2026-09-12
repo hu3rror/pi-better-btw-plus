@@ -137,3 +137,49 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
 - 实施顺序：抽取 → index.ts 去重 → `pointer-gesture.test.ts` → 瘦身 `select.test.ts`，每步一个 commit。
 - 术语已沉淀：CONTEXT.md 新增 **Pointer gesture**（伞形词），**Mouse selection** 收敛为子概念。
 - 不重开 ADR：与 ADR-0001 / ADR-0002 无交集。
+
+---
+
+# Spec: 抽取 Write-Paths 写路径提取模块
+
+> 状态：已实施（候选 5 深化，grilling Q1–Q4 收敛，无对应 issue）。术语以 `CONTEXT.md` 为准（新增 **File overlap**）；不重开 ADR-0001 / ADR-0002 / ADR-0004。
+
+## Problem Statement
+
+`tool-wrapper.ts` 同时承担两件事：给 full lane 工具套 **File overlap** 确认包装，以及手写 shell 分词器解析 bash 命令提取写路径。解析器是一个小型语言解析器却埋在包装模块内，且**零测试**——fd 重定向 `N>&M` 族同时造成漏报与误报（`cp a b 2>&1 | tee log` 误报 `["2","log"]` 且漏掉真实目标 `b`）；`sed -i` / `perl -pi` / `awk -i inplace` 等就地写命令完全不识别（known limitation）。`extractWritePaths` 已有两个调用方（overlap 包装 + `index.ts` 写跟踪）却长在错误的模块里。
+
+## Solution
+
+新建 `srcs/write-paths.ts`：`extractWritePaths`（write/edit/bash 分发）与 bash 分词/路径提取整体迁入，bash 辅助函数全部内部化；`tool-wrapper.ts` 回归只做包装拦截。词法级修复 fd 重定向族：`N>&M` / `&>` / `&>>` 识别为单一构造，fd 数字不进入 operand、目标不被误报。外部行为除该修复族外零变化。
+
+## 关键决策（grilling Q1–Q4）
+
+- **Q1 契约**：修复 `N>&M` fd 重定向族（语法级 bug），测试覆盖 `2>&1`、`1>&2`、`&> file`、`&>>`、`2>f`；`sed -i` 等就地写为 Known Limitation，模块头注释留档 + 独立 issue 进 Backlog（网络阻塞待建）。
+- **Q2 模块边界**：选项 B——`extractWritePaths` 整块搬到 `write-paths.ts`，模块即 `write-paths.ts` 这个名字；`tool-wrapper.ts` 仅保留包装拦截职责；`index.ts` import 改指新模块。
+- **Q3 测试形状**：选项 A——纯黑盒契约表，只测公共 API，不导出 `tokenizeShell`；table-driven 断言，重构韧性优先。
+- **Q4 术语**：CONTEXT.md 新增 **File overlap**（主 session 已写文件集合；full lane 写入命中先经确认；read-only lane 靠 strip 哲学不触达）。不立 ADR。
+
+## 实现要点（已落实）
+
+- 分词器 op 集合扩展：`>` `>>` `&>` `&>>` `>&` `|` `||` `&` `&&` `;`；三字符 `&>>` 分支先于两字符 map（`TWO_CHAR_OPS` 只含两字符 op）。
+- 两套 op 角色集：`REDIRECT_PUSH`（`>`/`>>`/`&>`/`&>>` 推目标为写路径）与 `CONSUME_NEXT`（`>&` 只消费目标不推——fd dup 非路径）。
+- operand 收集跳过「重定向前导数字 fd」（`/^\d+$/` 且下一 token 为重定向 op），`mv 2>&1 dst` 不再把 `2`/`1` 当 cmd 参数或目标。
+- 契约表 34 例：修复前 `cp a b 2>&1 | tee log` → `["2","log"]`，修复后 → `["b","log"]`。
+
+## 测试决策
+
+- 新接缝 `test/write-paths.test.ts`：34 条黑盒契约（重定向 / fd 族 / 引号 / 分隔符 / 命令特判 tee-touch-rm-cp-mv / 忽略项 `/dev/*`、flags / write-edit-read 工具），纯公共 API，红→绿落码。
+- 验证：`bun run typecheck` exit 0；`bun run test` 249 pass（原 215 + 34，0 fail）。
+
+## Out of Scope
+
+- `sed -i` / `perl -pi` / `awk -i inplace` 就地写识别（known limitation → 独立 backlog issue，含验收：`sed -i` 返回目标、`sed -n` 只读形态返回空）。
+- 替换手写分词器为完整 shell 解析器；`<` 输入重定向 / heredoc 展开 / Windows 路径形态。
+- 候选 1/2/3/4（ForkTurnRunner、PointerGesture、LayoutSpec、StatusChannel）——各自独立落地，与此节无交集。
+
+## Further Notes
+
+- 实施顺序：契约测试先红（模块缺失）→ 模块落码（搬迁 + fd 修复）→ tool-wrapper 瘦身（-186 行）→ index.ts import 改指 → 全绿。
+- Review 机械项已清理：三新/改文件补齐尾随换行（对齐仓库 LF 约定）；`TWO_CHAR_OPS` 删不可达 `"&>>"` 死键。
+- 术语已沉淀：CONTEXT.md 新增 **File overlap**。
+- 待办：backlog issue 创建（`gh issue create --label needs-triage`，网络恢复后执行，body 就绪于 `%TEMP%\issue-body.md`）。
