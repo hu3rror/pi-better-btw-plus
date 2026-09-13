@@ -6,7 +6,7 @@ issue #1（spec）的验收清单。对应 SPEC.md「Testing Decisions → 手�
 
 - Windows Terminal + 本机 pi 0.85.1（spec 基线）
 - 扩展加载 `./srcs/index.ts`，改完代码 `/reload` 后重开侧聊（config 每次打开时重读，无需 reload）
-- 默认只读模式；`Ctrl+T` 切编辑模式
+- 默认只读模式；`Alt+T` 切编辑模式
 
 ## 打开侧聊
 
@@ -24,6 +24,7 @@ issue #1（spec）的验收清单。对应 SPEC.md「Testing Decisions → 手�
 5. 无选区时右键聊天区 → 无任何副作用（不复制、无菜单）
 6. 右键按下后移到聊天区外再松开 → 不复制（动作在 release 触发，release 位置决定）
 7. `Ctrl+C` / `Ctrl+Shift+C` 热键复制仍可用（与右键互不影响）
+8. `Ctrl+X` → 复制最后一条 assistant 消息到剪贴板（无需选区）
 
 ## B. 右键粘贴（输入框）
 
@@ -34,16 +35,17 @@ issue #1（spec）的验收清单。对应 SPEC.md「Testing Decisions → 手�
 5. 剪贴板为空 → 状态行 `Clipboard is empty`，编辑器不变
 6. 剪贴板含 `\r\n` 和 `\t` → 编辑器显示 `\n` 与 4 空格（归一化）
 7. 右键头部/边框 → 无副作用
+8. `Ctrl+V` / `Alt+V` → 键盘粘贴，行为与右键粘贴一致（插入光标处、归一化、大段折叠标记）
 
 > 读取失败（平台通道与 OSC 52 回退全部不可用）→ `Clipboard read failed`，编辑器不变。win32 平台通道是 `Get-Clipboard -Raw`，通常只在 PowerShell 被禁用/降级时走到失败分支，可用单测覆盖代替。
 
-## C. Alt+M 模型切换
+## C. Ctrl+L 模型切换
 
-1. `Alt+M` → 列表打开，只含 scoped（`--models` / `enabledModels`）或可用目录中**已配置认证**的模型
+1. `Ctrl+L` → 列表打开，只含 scoped（`--models` / `enabledModels`）或可用目录中**已配置认证**的模型
 2. `↑/↓` 选择、`Enter` 确认 → 状态行 `✓ Model: <id>`，头部 `[Model: <id>]` 更新
-3. `Alt+M` → `Esc` → 取消，模型不变
+3. `Ctrl+L` → `Esc` → 取消，模型不变
 4. 切到无 reasoning 能力的模型 → 头部显示 `thinking off`（钳制生效）
-5. 流式（agent 回复中）按 `Alt+M` → 状态行 `Model switch unavailable while streaming`，列表不打开
+5. 流式（agent 回复中）按 `Ctrl+L` → 状态行 `Model switch unavailable while streaming`，列表不打开
 6. 切换后继续提问 → 原对话上下文保留（不用重开侧聊）
 7. `Alt+W` 背景化再恢复 → 模型选择保留
 8. `Alt+R`（refork）/ `Alt+N`（clear）/ `Esc` 关闭 → 模型重置回主会话模型
@@ -54,7 +56,7 @@ issue #1（spec）的验收清单。对应 SPEC.md「Testing Decisions → 手�
 
 触发瞬时错误（两种方式任选）：
 
-- **本地不可达端点**：在 `~/.pi/agent/settings.json` 的 models 里加一个 `baseUrl: "http://127.0.0.1:9877/v1"` 的模型（端口不监听 → connection refused → 可重试），`/reload` 后用 `Alt+M` 切到它再提问。**验证后删除该模型并还原 settings.json。**
+- **本地不可达端点**：在 `~/.pi/agent/settings.json` 的 models 里加一个 `baseUrl: "http://127.0.0.1:9877/v1"` 的模型（端口不监听 → connection refused → 可重试），`/reload` 后用 `Ctrl+L` 切到它再提问。**验证后删除该模型并还原 settings.json。**
 - **mock 503 服务器**（PowerShell 起一个恒 503 的端点，baseUrl 指过去）：
 
 ```powershell
@@ -91,12 +93,12 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 | 开关 | 置 `false` 后的预期 |
 | ---- | ---- |
 | `rightClickCopyPaste` | 有选区右键聊天区不复制；输入框右键不粘贴；`Ctrl+C` 热键仍正常 |
-| `modelSwitch` | `Alt+M` 无反应，头部模型不变 |
+| `modelSwitch` | `Ctrl+L` 无反应，头部模型不变 |
 | `retry` | 即使 `settings.retry` 开启，瞬时错误直接显示、零退避（等价 D-5） |
 
 其它：
 
-- 只覆盖一个键 → 其余开关保持默认开启（如只关 `retry`，右键和 Alt+M 仍工作）
+- 只覆盖一个键 → 其余开关保持默认开启（如只关 `retry`，右键和 Ctrl+L 仍工作）
 - 非法值（如 `"retry": "disabled"`）→ 忽略，回退默认 `true`
 - 还原配置后重开侧聊 → 行为恢复
 
@@ -105,7 +107,7 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 - 拖选松开鼠标**不自动复制**（复制只走右键/热键）
 - 滚轮滚动、`PgUp`/`PgDn`、双击选行仍正常
 - `Esc` 空闲关闭、`Alt+R` refork、`Alt+N` clear、`Alt+E` 导出正常
-- 提示栏两行仍在：`… · C+c copy · R-click copy/paste · …` 与 `A+w bg · A+r fork · A+n new · A+e export · A+m model`
+- 提示栏两行仍在：`… · C+c copy · C+x last · C+v paste · R-click copy/paste · …` 与 `A+w bg · A+r fork · A+n new · A+e export · C+l model`
 
 ## 故障排查
 
@@ -113,7 +115,7 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 | ---- | ---- |
 | 右键复制无反应 | 是否有活跃选区；光标是否在聊天区内；`features.rightClickCopyPaste` 是否被关 |
 | 右键粘贴无反应 | 剪贴板是否有文本；光标是否在输入框内；同上 |
-| `Alt+M` 打不开 | 流式期间被拒（状态行有提示）；`features.modelSwitch: false` |
+| `Ctrl+L` 打不开 | 流式期间被拒（状态行有提示）；`features.modelSwitch: false` |
 | 无 retry 倒计时 | `settings.retry.enabled: false` 或 `features.retry: false`；错误类别不可重试（溢出/配额/abort） |
 | 剪贴板读不到 | win32 平台通道 `Get-Clipboard -Raw` 不可用且 OSC 52 无回退时的预期行为（`Clipboard read failed`） |
 

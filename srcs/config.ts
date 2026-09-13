@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { PromptPackManifest } from "./prompt-pack.ts";
-import { PROVIDER_RETRY_KEYS, type ProviderRetrySettings } from "./provider-retry.ts";
+import type { ProviderRetrySettings } from "./provider-retry.ts";
 import type { RetryPolicy } from "./retry.ts";
 /**
  * Layered config resolution for pi-better-btw.
@@ -37,7 +38,7 @@ import type { RetryPolicy } from "./retry.ts";
 export interface SideChatFeatures {
   /** Right-click copy (chat selection) / paste (editor). Default: true. */
   rightClickCopyPaste: boolean;
-  /** Alt+M fork model picker. Default: true. */
+  /** Ctrl+L fork model picker. Default: true. */
   modelSwitch: boolean;
   /** Turn-level auto-retry of transient provider errors. Default: true. */
   retry: boolean;
@@ -66,16 +67,15 @@ export const USER_CONFIG_DIR = join(homedir(), ".pi", "agent", CONFIG_SUBDIR);
 export const AGENT_CONFIG_DIR = join(homedir(), ".pi", "agent");
 
 /**
- * Read pi's `settings.retry` budget (D8). The fork shares pi's settings files
- * rather than re-declaring them: global <agentConfigDir>/settings.json merged
- * with project <cwd>/.pi/settings.json (project wins per key, mirroring pi's
- * deepMergeSettings), then the `retry` block is extracted with pi's defaults
- * (settingsManager.getRetrySettings: enabled=true, maxRetries=3,
- * baseDelayMs=2000). The `retry.provider` block (spec #20 D4: timeoutMs /
- * maxRetries / maxRetryDelayMs — HTTP-layer retry knobs) is extracted too,
- * with only defined number keys kept; it is consumed solely by the overlay's
- * stream assembly, never by the turn loop. Invalid/absent files contribute
- * nothing; a present-but-unreadable file warns instead of failing the fork.
+ * Read pi's `settings.retry` budget (D8) via pi's own `SettingsManager` —
+ * file reading, deep merge (project wins per key), legacy migration
+ * (`retry.maxDelayMs` → `retry.provider.maxRetryDelayMs`) and the canonical
+ * defaults (enabled=true, maxRetries=3, baseDelayMs=2000) all come from pi; no
+ * hand-rolled duplicate. The `retry.provider` block (spec #20 D4: timeoutMs /
+ * maxRetries / maxRetryDelayMs) is forwarded only when a provider block is
+ * actually configured, and only number keys; it is consumed solely by the
+ * overlay's stream assembly, never by the turn loop. A present-but-unreadable
+ * settings file warns and contributes nothing (pi's own fallback).
  */
 export interface LoadRetryPolicyOptions {
   /** Agent config dir holding pi's global settings.json (~/.pi/agent). */
@@ -89,65 +89,41 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Deep merge like pi's deepMergeSettings: nested plain objects merge, arrays/others replace. */
-function deepMergeSettings(
-  base: Record<string, unknown>,
-  overrides: Record<string, unknown>,
-): Record<string, unknown> {
-  const result = { ...base };
-  for (const [key, value] of Object.entries(overrides)) {
-    const baseValue = result[key];
-    result[key] =
-      isPlainRecord(baseValue) && isPlainRecord(value)
-        ? deepMergeSettings(baseValue, value)
-        : value;
-  }
-  return result;
-}
-
-function readSettingsFile(
-  path: string,
-  onWarning?: (message: string) => void,
-): Record<string, unknown> {
-  try {
-    const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
-    return isPlainRecord(raw) ? raw : {};
-  } catch {
-    if (existsSync(path) && onWarning) {
-      onWarning(`pi-better-btw: ignoring invalid settings ${path}`);
-    }
-    return {};
-  }
-}
 
 export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPolicy {
   const agentConfigDir = options.agentConfigDir ?? AGENT_CONFIG_DIR;
-  const merged = deepMergeSettings(
-    readSettingsFile(join(agentConfigDir, "settings.json"), options.onWarning),
-    options.cwd
-      ? readSettingsFile(join(options.cwd, ".pi", "settings.json"), options.onWarning)
-      : {},
-  );
-  const retry = isPlainRecord(merged.retry) ? merged.retry : {};
-  // D4 (spec #20): extract the provider block (HTTP-layer retry knobs)
-  // from the already-global+project-merged settings. Only defined number
-  // keys are kept; missing keys fall empty — no maxRetryDelayMs default
-  // here, because pi-ai's streamSimple defaults it to 60000 internally.
-  const provider = isPlainRecord(retry.provider) ? retry.provider : {};
-  const providerSettings: ProviderRetrySettings = {};
-  for (const key of PROVIDER_RETRY_KEYS) {
-    if (typeof provider[key] === "number") providerSettings[key] = provider[key];
+  const settings = SettingsManager.create(options.cwd ?? process.cwd(), agentConfigDir, {
+    projectTrusted: true,
+  });
+  // Surface load errors (invalid JSON etc.) through the caller's warning hook,
+  // mirroring the old loader's present-but-unreadable → warn behavior.
+  for (const err of settings.drainErrors()) {
+    options.onWarning?.(`pi-better-btw: ignoring invalid settings (${err.scope})`);
+  }
+  const retry = settings.getRetrySettings();
+  // Provider block (spec #20): forward only number keys from an actually
+  // configured `retry.provider`. getProviderRetrySettings() defaults
+  // maxRetryDelayMs to 60000 even when no block exists, so configured-ness is
+  // detected from the (already-migrated) per-scope settings; an absent block
+  // keeps `provider` undefined so the overlay's stream assembly stays identity
+  // (D3: unconfigured users keep the bare streamSimple, zero overhead).
+  const provider = settings.getProviderRetrySettings();
+  const providerConfigured = [
+    settings.getGlobalSettings(),
+    settings.getProjectSettings(),
+  ].some((scope) => isPlainRecord(scope.retry) && isPlainRecord(scope.retry.provider));
+  const providerBlock: ProviderRetrySettings = {};
+  if (providerConfigured) {
+    if (typeof provider.timeoutMs === "number") providerBlock.timeoutMs = provider.timeoutMs;
+    if (typeof provider.maxRetries === "number") providerBlock.maxRetries = provider.maxRetries;
+    if (typeof provider.maxRetryDelayMs === "number")
+      providerBlock.maxRetryDelayMs = provider.maxRetryDelayMs;
   }
   return {
-    enabled:
-      typeof retry.enabled === "boolean" ? retry.enabled : true,
-    maxRetries:
-      typeof retry.maxRetries === "number" ? retry.maxRetries : 3,
-    baseDelayMs:
-      typeof retry.baseDelayMs === "number" ? retry.baseDelayMs : 2000,
-    ...(Object.keys(providerSettings).length > 0
-      ? { provider: providerSettings }
-      : {}),
+    enabled: retry.enabled,
+    maxRetries: retry.maxRetries,
+    baseDelayMs: retry.baseDelayMs,
+    ...(Object.keys(providerBlock).length > 0 ? { provider: providerBlock } : {}),
   };
 }
 

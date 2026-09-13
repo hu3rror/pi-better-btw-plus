@@ -413,15 +413,14 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
     }
   });
 
-  test("missing provider keys fall empty (only defined keys present)", () => {
+  test("missing provider keys: configured keys forwarded, maxRetryDelayMs defaults to 60000", () => {
     const tree = makeRetryTree({
       global: { retry: { provider: { maxRetries: 15 } } },
     });
     try {
       const policy = tree.load();
-      expect(policy.provider).toEqual({ maxRetries: 15 });
+      expect(policy.provider).toEqual({ maxRetries: 15, maxRetryDelayMs: 60000 });
       expect(policy.provider?.timeoutMs).toBeUndefined();
-      expect(policy.provider?.maxRetryDelayMs).toBeUndefined();
     } finally {
       tree.cleanup();
     }
@@ -452,7 +451,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
       global: { retry: { provider: { maxRetries: "15", timeoutMs: 1000 } } },
     });
     try {
-      expect(tree.load().provider).toEqual({ timeoutMs: 1000 });
+      expect(tree.load().provider).toEqual({ timeoutMs: 1000, maxRetryDelayMs: 60000 });
     } finally {
       tree.cleanup();
     }

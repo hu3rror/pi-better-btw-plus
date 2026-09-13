@@ -32,7 +32,7 @@ pi install npm:pi-better-btw-plus
 [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) 的全部功能都在，另新增：
 
 - **右键复制与粘贴** —— 聊天区拖选后右键复制（延续 Windows Terminal 肌肉记忆）；输入框右键从系统剪贴板粘贴，走编辑器内置归一化与大段 `[paste #N …]` 折叠标记。不再是 hotkey-only。
-- **Fork 模型切换（`Alt+M`）** —— 侧聊内选择任意已认证模型，无需重建 fork；仅作用于 fork 本身（ADR 0002），thinking level 按新模型能力自动钳制。
+- **Fork 模型切换（`Ctrl+L`）** —— 侧聊内选择任意已认证模型，无需重建 fork；仅作用于 fork 本身（ADR 0002），thinking level 按新模型能力自动钳制。
 - **Turn 级自动重试** —— 与主会话共用 `settings.retry` 预算：瞬时 provider 错误指数退避重试，带实时倒计时；`Esc` 取消。
 - **功能开关** —— 分层配置的 `features` 块可关闭以上任意功能（`rightClickCopyPaste` / `modelSwitch` / `retry`），另有 `readOnlyExtensionAllowlistExclude` 移除内置 allowlist 默认项。
 
@@ -54,7 +54,7 @@ pi install npm:pi-better-btw-plus
 
 - `TUI scroll,select,copy` ：在TUI-overlay 自订阅鼠标/hotkey事件，实现滚屏 ，text选中 ， Ctrl +C 复制功能
 
-- `Readonly/Edit Mode` : 默认只读来回应btw question，如果你希望Agent顺手做些小修改，Ctrl + t To Edit Mode.
+- `Readonly/Edit Mode` : 默认只读来回应btw question，如果你希望Agent顺手做些小修改，Alt + T To Edit Mode.
 
   - ToolAllowList : bundle + config.json custom
 
@@ -74,13 +74,13 @@ pi install npm:pi-better-btw-plus
 | 快捷键 | 作用 |
 | ------ | ---- |
 | `Alt+W` | 打开（关闭时）/ 后台化（显示时）/ 恢复（隐藏时） |
-| `Ctrl+T` | 切换只读 / 编辑模式 |
+| `Alt+T` | 切换只读 / 编辑模式 |
 | `Alt+R` | 从最新主线上下文重新 fork |
 | `Alt+N` | 开始空白对话 |
 | `Alt+E` | 导出对话记录到 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
-| `Alt+M` | 打开 fork 模型选择器（scoped + 已认证模型；`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
+| `Ctrl+L` | 打开 fork 模型选择器（scoped + 已认证模型；`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
 
-在Readonly Mode(default),只读车道是**强制的**：越权调用工具会被硬阻断并注入prompt；第二次违规会升级措辞并中止该轮，提示（`🚧 lane blocked` 状态行）。已执行但失败的只读调用会被 `afterToolCall` 备注再次归位。编辑模式（`Ctrl+T`）不受影响。
+在Readonly Mode(default),只读车道是**强制的**：越权调用工具会被硬阻断并注入prompt；第二次违规会升级措辞并中止该轮，提示（`🚧 lane blocked` 状态行）。已执行但失败的只读调用会被 `afterToolCall` 备注再次归位。编辑模式（`Alt+T`）不受影响。
 
 **窥视主线 agent** —— `peek_main` 工具读取主线会话的近期活动。
 
@@ -101,7 +101,7 @@ What changed since I opened this side chat?
 
 **对话导出** —— `Alt+E` 把 btw 历史（fork 上下文、framing 块、对话、流式中内容）导出为 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` 的 markdown 诊断产物，便于调试功能开发。
 
-**Fork 模型切换** —— `Alt+M` 在浮层内打开模型选择器（`↑/↓` 移动，`Enter` 确认，`Esc` 取消）。列表优先展示会话作用域模型（`--models` / `enabledModels`），为空时回退可用模型目录，且只显示已配置认证的模型。确认后直接替换 fork agent 的运行时模型——下一 turn 生效，无需重建 fork——并按新模型能力钳制 thinking level（无 reasoning 的模型钳制为 `off`）。选择为 fork 局部状态（ADR 0002）：主会话模型不受影响。后台化（`Alt+W`）保留选择；`Alt+R` / `Alt+N` / `Esc` 关闭后随实例重置。头部显示当前 fork 模型；流式期间拒绝打开。
+**Fork 模型切换** —— `Ctrl+L` 在浮层内打开模型选择器（`↑/↓` 移动，`Enter` 确认，`Esc` 取消）。列表优先展示会话作用域模型（`--models` / `enabledModels`），为空时回退可用模型目录，且只显示已配置认证的模型。确认后直接替换 fork agent 的运行时模型——下一 turn 生效，无需重建 fork——并按新模型能力钳制 thinking level（无 reasoning 的模型钳制为 `off`）。选择为 fork 局部状态（ADR 0002）：主会话模型不受影响。后台化（`Alt+W`）保留选择；`Alt+R` / `Alt+N` / `Esc` 关闭后随实例重置。头部显示当前 fork 模型；流式期间拒绝打开。
 
 ## 快捷键
 
@@ -113,14 +113,16 @@ What changed since I opened this side chat?
 | `Alt+R` | 从最新主线上下文重新 fork |
 | `Alt+N` | 开始空白对话 |
 | `Alt+E` | 导出 btw 对话历史到 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
-| `Alt+M` | 打开 fork 模型选择器（`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
-| `Ctrl+T` | 切换只读 / 编辑模式 |
+| `Ctrl+L` | 打开 fork 模型选择器（`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
+| `Alt+T` | 切换只读 / 编辑模式 |
 | `PgUp` / `PgDn` | 整页滚动历史 |
 | `Shift+↑` / `Shift+↓` | 按行滚动 |
 | 鼠标滚轮 | 指针位于聊天区域时滚动 |
 | 鼠标拖拽 | 选择聊天文本（反色高亮）；松开不自动复制 |
 | 双击 | 选择整行 |
 | `Ctrl+C` / `Ctrl+Shift+C` | 复制当前鼠标选择（选择保留到下次点击，可重复复制） |
+| `Ctrl+X` | 复制最后一条 assistant 消息 |
+| `Ctrl+V` / `Alt+V` | 把系统剪贴板粘贴到光标处（归一化 + `[paste #N …]` 标记，同右键粘贴） |
 | 鼠标右键（聊天区） | 复制保留的鼠标选择（松开时触发，保持高亮） |
 | 鼠标右键（输入框） | 把系统剪贴板粘贴到光标处（编辑器归一化 + 大段 `[paste #N …]` 标记） |
 ## 命令参考
@@ -162,7 +164,7 @@ pi-better-btw 从三个位置按优先级递增读取 `config.json` —— 每�
   | 开关 | 为 `false` 时的行为 |
   | ---- | ---- |
   | `rightClickCopyPaste` | 右键复制（聊天区）/ 粘贴（输入框）失效——快捷键不受影响 |
-  | `modelSwitch` | `Alt+M` 无反应 |
+  | `modelSwitch` | `Ctrl+L` 无反应 |
   | `retry` | fork 每轮只跑一次尝试、零退避，即使 pi 的 `settings.retry` 开启 |
 
 示例（用户或项目层）：
@@ -216,8 +218,8 @@ btw 上下文保留主线的 system prompt 于 system 槽位，并逐字注入 f
 │   ├── side-chat-mouse.ts    # 最小 SGR 鼠标解析
 │   ├── clipboard-read.ts    # 平台剪贴板读取（win32 / darwin / linux + OSC 52 兜底）
 │   ├── retry.ts             # turn 级重试引擎：classifyRetryable + runWithRetry
-│   ├── model-switch.ts      # Alt+M fork 模型选择器：列表构建 + thinking 钳制
-│   ├── shortcuts.ts         # 快捷键绑定（Alt+W / Ctrl+T）
+│   ├── model-switch.ts      # Ctrl+L fork 模型选择器：列表构建 + thinking 钳制
+│   ├── shortcuts.ts         # 快捷键绑定（Alt+W / Alt+T）
 │   ├── side-chat-export.ts   # Alt+E 对话导出
 │   ├── tool-wrapper.ts       # 写路径重叠警告
 │   └── file-activity-tracker.ts

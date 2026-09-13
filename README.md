@@ -32,7 +32,7 @@ You're in the middle of a longer task and want to ask something small without de
 Everything in [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) is here, plus:
 
 - **Right-click copy & paste** — drag-select chat text and right-click to copy (Windows Terminal muscle memory); right-click inside the input editor pastes the system clipboard through the editor's own normalization and `[paste #N …]` markers for large pastes. No more hotkey-only copying.
-- **Fork model switching (`Alt+M`)** — pick any authenticated model for the side chat without rebuilding the fork; fork-local only (ADR 0002), thinking level auto-clamped to the new model's capabilities.
+- **Fork model switching (`Ctrl+L`)** — pick any authenticated model for the side chat without rebuilding the fork; fork-local only (ADR 0002), thinking level auto-clamped to the new model's capabilities.
 - **Turn-level auto-retry** — shares the main session's `settings.retry` budget: transient provider errors back off and retry with a live countdown; `Esc` cancels.
 - **Feature kill switches** — the layered config's `features` block turns any of the above off (`rightClickCopyPaste` / `modelSwitch` / `retry`), plus `readOnlyExtensionAllowlistExclude` to drop bundled allowlist defaults.
 
@@ -54,7 +54,7 @@ See [Feat](#feat) for the full feature set.
 
 - `TUI scroll, select, copy`: subscribes to mouse/hotkey events in the TUI overlay for scrolling, text selection, and `Ctrl+C` copy.
 
-- `Readonly/Edit Mode`: read-only by default to answer btw questions; if you want the agent to make small edits along the way, `Ctrl+T` switches to edit mode.
+- `Readonly/Edit Mode`: read-only by default to answer btw questions; if you want the agent to make small edits along the way, `Alt+T` switches to edit mode.
 
   - ToolAllowList: bundle + config.json custom
 
@@ -72,13 +72,13 @@ Press `Esc` to close it. Reopen with `/btw` or `Alt+W` to continue where you lef
 | Shortcut | Action |
 | -------- | ------ |
 | `Alt+W` | Open (when closed) / background (when visible) / restore (when hidden) |
-| `Ctrl+T` | Toggle read-only / edit mode |
+| `Alt+T` | Toggle read-only / edit mode |
 | `Alt+R` | Re-fork from the latest main context |
 | `Alt+N` | Start an empty conversation |
 | `Alt+E` | Export the transcript to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
-| `Alt+M` | Open the fork model picker (scoped + authenticated models; `↑/↓` select, `Enter` confirm, `Esc` cancel) |
+| `Ctrl+L` | Open the fork model picker (scoped + authenticated models; `↑/↓` select, `Enter` confirm, `Esc` cancel) |
 
-In Read-only Mode (default), the read-only lane is **enforced**: attempting an out-of-lane tool call is hard-blocked with a prompt injection; a second violation escalates the wording and aborts the turn (a `🚧 lane blocked` status line). Executed-but-failed read-only calls are re-grounded by an `afterToolCall` note. Edit mode (`Ctrl+T`) is unaffected.
+In Read-only Mode (default), the read-only lane is **enforced**: attempting an out-of-lane tool call is hard-blocked with a prompt injection; a second violation escalates the wording and aborts the turn (a `🚧 lane blocked` status line). Executed-but-failed read-only calls are re-grounded by an `afterToolCall` note. Edit mode (`Alt+T`) is unaffected.
 
 **Peek at the main agent** — the `peek_main` tool reads recent activity from the main session.
 
@@ -98,7 +98,7 @@ What changed since I opened this side chat?
 **Right-click paste in the input box** — right-click inside the editor pastes the system clipboard at the cursor through the editor's built-in paste entry: line endings/tabs are normalized (`\r`→`\n`, `\t`→4 spaces), large pastes (>10 lines or >1000 chars) collapse to a `[paste #N +X lines]` / `[paste #N X chars]` marker that expands back to full text on submit, and the paste is a single undo step. When the clipboard can't be read (platform channel + OSC 52 fallback both unavailable) or holds no text, a one-line hint appears and the editor is left untouched.
 
 **Transcript export** — `Alt+E` dumps the btw history (forked context, framing block, conversation, in-flight stream) to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` as a markdown diagnostic artifact, useful for debugging feature work.
-**Fork model switching** — `Alt+M` opens a model picker inside the overlay (`↑/↓` move, `Enter` confirm, `Esc` cancel). It lists the session's scoped models first (`--models` / `enabledModels`), falling back to the available catalogue, and only shows models with configured auth. Confirming swaps the fork agent's runtime model — the next turn uses it without rebuilding the fork — and clamps the thinking level to the new model's capabilities (no-reasoning models go to `off`). The choice is fork-local (ADR 0002): the main session's model is never touched. It survives backgrounding (`Alt+W`) and resets on `Alt+R`/`Alt+N`/`Esc` close. The header shows the current fork model; opening is rejected while streaming.
+**Fork model switching** — `Ctrl+L` opens a model picker inside the overlay (`↑/↓` move, `Enter` confirm, `Esc` cancel). It lists the session's scoped models first (`--models` / `enabledModels`), falling back to the available catalogue, and only shows models with configured auth. Confirming swaps the fork agent's runtime model — the next turn uses it without rebuilding the fork — and clamps the thinking level to the new model's capabilities (no-reasoning models go to `off`). The choice is fork-local (ADR 0002): the main session's model is never touched. It survives backgrounding (`Alt+W`) and resets on `Alt+R`/`Alt+N`/`Esc` close. The header shows the current fork model; opening is rejected while streaming.
 **Auto-retry (turn-level)** — reads pi's `settings.retry` budget (`enabled` / `maxRetries` / `baseDelayMs`, same defaults as the main session). Transient provider errors (overloaded / rate limit / 5xx) auto-retry with exponential backoff — the status area shows `Retrying (n/m) in Xs…` with a live countdown — and the failed assistant message is stripped before the retry so it never re-enters the next request. Context overflow and aborts never retry. `Esc` during the backoff cancels the wait and surfaces the last error as the final result; budget exhaustion does the same. With `enabled: false` (e.g. local-model debugging) errors surface immediately with zero overhead.
 
 
@@ -112,14 +112,16 @@ What changed since I opened this side chat?
 | `Alt+R` | Re-fork from latest main context |
 | `Alt+N` | Start empty conversation |
 | `Alt+E` | Export the btw chat history to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
-| `Alt+M` | Open the fork model picker (`↑/↓` select, `Enter` confirm, `Esc` cancel) |
-| `Ctrl+T` | Toggle read-only / edit mode |
+| `Ctrl+L` | Open the fork model picker (`↑/↓` select, `Enter` confirm, `Esc` cancel) |
+| `Alt+T` | Toggle read-only / edit mode |
 | `PgUp` / `PgDn` | Scroll history by a page |
 | `Shift+↑` / `Shift+↓` | Scroll by a few lines |
 | Mouse wheel | Scroll when the pointer is over the chat |
 | Mouse drag | Select text in the chat area (inverse-video highlight); no copy on release |
 | Double-click | Select the whole rendered line |
 | `Ctrl+C` / `Ctrl+Shift+C` | Copy the active mouse selection (the selection is kept until you click elsewhere, so repeated presses re-copy) |
+| `Ctrl+X` | Copy the last assistant message |
+| `Ctrl+V` / `Alt+V` | Paste the system clipboard at the cursor (same normalization + `[paste #N …]` markers as right-click paste) |
 | Mouse right-click (chat area) | Copy the retained mouse selection (fires on release, keeps the highlight) |
 | Mouse right-click (input editor) | Paste the system clipboard at the cursor (editor normalization + `[paste #N …]` markers for large pastes) |
 ## Command Reference
@@ -161,7 +163,7 @@ Keys:
   | Switch | Behavior when `false` |
   |--------|------------------------|
   | `rightClickCopyPaste` | right-click copy (chat) / paste (editor) is inert — the hotkeys still work |
-  | `modelSwitch` | `Alt+M` does nothing |
+  | `modelSwitch` | `Ctrl+L` does nothing |
   | `retry` | fork turns run a single attempt with zero backoff, even if pi's `settings.retry` is enabled |
 
 Example (user or project layer):
@@ -215,8 +217,8 @@ Structure:
 │   ├── side-chat-mouse.ts    # minimal SGR mouse parsing
 │   ├── clipboard-read.ts    # platform clipboard read (win32 / darwin / linux + OSC 52 fallback)
 │   ├── retry.ts             # turn-level retry: classifyRetryable + runWithRetry
-│   ├── shortcuts.ts         # hotkey bindings (Alt+W / Ctrl+T)
-│   ├── model-switch.ts       # Alt+M fork model picker: list building + thinking clamp
+│   ├── shortcuts.ts         # hotkey bindings (Alt+W / Alt+T)
+│   ├── model-switch.ts       # Ctrl+L fork model picker: list building + thinking clamp
 │   ├── side-chat-export.ts   # Alt+E transcript export
 │   ├── tool-wrapper.ts       # write-path overlap warnings
 │   └── file-activity-tracker.ts

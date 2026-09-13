@@ -286,4 +286,28 @@ describe("side-chat-overlay.ts", () => {
     releaseHeld(); // settle the turn so no orphan timers leak
     await tick();
   });
+
+  test("ctrl+x copies the last assistant message (app.message.copy parity)", async () => {
+    const overlay = makeOverlay(undefined, {
+      runnerFactory: () =>
+        ({
+          agent: {
+            state: {
+              model: { id: "m", reasoning: false },
+              thinkingLevel: "off",
+              messages: [
+                { role: "user", content: "hi" },
+                { role: "assistant", content: [{ type: "text", text: "last reply" }] },
+              ],
+            },
+          },
+          isRunning: false,
+          run: async () => {},
+          cancel: () => {},
+        }) as any,
+    });
+    overlay.handleInput("\x18"); // raw Ctrl+X terminal byte
+    await tick();
+    expect(copiedTexts()).toEqual(["last reply"]);
+  });
 });

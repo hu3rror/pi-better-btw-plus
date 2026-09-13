@@ -233,4 +233,20 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     await tick();
     expect((overlay as any).editor.getText()).toBe("");
   });
+
+  test("ctrl+v pastes into the editor (keyboard paste, app.clipboard.pasteImage parity)", async () => {
+    const overlay = makeOverlay();
+    setClipboardReadResult("hello");
+    overlay.handleInput("\x16"); // raw Ctrl+V terminal byte
+    await tick();
+    expect((overlay as any).editor.getText()).toBe("hello");
+  });
+
+  test("alt+v pastes too (Windows/WSL binding)", async () => {
+    const overlay = makeOverlay();
+    setClipboardReadResult("alt");
+    overlay.handleInput("\x1bv"); // legacy Alt+V: ESC + v
+    await tick();
+    expect((overlay as any).editor.getText()).toBe("alt");
+  });
 });

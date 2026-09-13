@@ -1,6 +1,6 @@
 /**
  * Fork model switching (issue #5): pure list-building / thinking-level clamp
- * unit tests + overlay integration (Alt+M modal, apply, streaming reject).
+ * unit tests + overlay integration (Ctrl+L modal, apply, streaming reject).
  *
  * `getSelectListTheme()` from pi-coding-agent returns lazy closures over the
  * global theme singleton (throws "Theme not initialized" without initTheme),
@@ -114,7 +114,7 @@ function makeOverlay(overrides: any = {}): SideChatOverlayType {
   return new SideChatOverlay(opts);
 }
 
-const ALT_M = "\x1bm"; // legacy Alt+M: ESC + m
+const CTRL_L = "\x0c"; // legacy Ctrl+L: form feed (0x0C)
 const DOWN = "\x1b[B";
 const ENTER = "\r";
 const ESC = "\x1b";
@@ -210,18 +210,18 @@ describe("clampThinkingLevelForModel", () => {
   });
 });
 
-// --- Overlay: Alt+M picker ------------------------------------------------------
+// --- Overlay: Ctrl+L picker ------------------------------------------------------
 
 describe("side-chat-overlay model picker", () => {
   const modelA = makeModel("model-a");
   const modelB = makeModel("model-b", false); // no reasoning
   const available = [modelA, modelB];
 
-  test("Alt+M opens the modal list; the frame renders it", () => {
+  test("Ctrl+L opens the modal list; the frame renders it", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     expect(picker(overlay)).not.toBeNull();
     const lines = overlay.render(WIDTH);
     const stripped = lines.map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, ""));
@@ -235,7 +235,7 @@ describe("side-chat-overlay model picker", () => {
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
       scopedModels: [makeScoped(modelB)],
     });
-    scoped.handleInput(ALT_M);
+    scoped.handleInput(CTRL_L);
     const items = picker(scoped).filteredItems;
     expect(items.map((i: any) => i.value)).toEqual([modelKey(modelB)]);
   });
@@ -244,7 +244,7 @@ describe("side-chat-overlay model picker", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, ["model-a"]), // b lacks auth
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     const items = picker(overlay).filteredItems;
     expect(items.map((i: any) => i.value)).toEqual([modelKey(modelA)]);
   });
@@ -253,7 +253,7 @@ describe("side-chat-overlay model picker", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, []),
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     expect(picker(overlay)).toBeNull();
     const M: any = (overlay as any).messages;
     expect(
@@ -276,7 +276,7 @@ describe("side-chat-overlay model picker", () => {
     });
     // Preselected current model (index 0 = model-a). Move down to model-b
     // (non-reasoning) and confirm.
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     overlay.handleInput(DOWN);
     overlay.handleInput(ENTER);
     expect(picker(overlay)).toBeNull();
@@ -290,7 +290,7 @@ describe("side-chat-overlay model picker", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     overlay.handleInput(ENTER);
     expect(agentState(overlay).model.id).toBe("model-a");
     expect(agentState(overlay).thinkingLevel).toBe("medium");
@@ -301,7 +301,7 @@ describe("side-chat-overlay model picker", () => {
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
       scopedModels: [makeScoped(modelB, "low")],
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     overlay.handleInput(ENTER);
     // model-b has no reasoning → the scoped "low" still clamps to off.
     expect(agentState(overlay).model.id).toBe("model-b");
@@ -312,7 +312,7 @@ describe("side-chat-overlay model picker", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     overlay.handleInput(ESC);
     expect(picker(overlay)).toBeNull();
     expect(agentState(overlay).model.id).toBe("current-model");
@@ -338,7 +338,7 @@ describe("side-chat-overlay model picker", () => {
           cancel: () => {},
         }) as any,
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     expect(picker(overlay)).toBeNull();
     const M: any = (overlay as any).messages;
     expect(
@@ -366,7 +366,7 @@ describe("side-chat-overlay model picker", () => {
         backgrounded = true;
       },
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     expect(picker(overlay)).not.toBeNull();
     overlay.handleInput("\x1bw"); // Alt+W
     expect(picker(overlay)).toBeNull();
@@ -374,19 +374,19 @@ describe("side-chat-overlay model picker", () => {
     // The fork model was not applied (cancel, not confirm).
     expect(agentState(overlay).model.id).toBe("current-model");
   });
-  test("modelSwitch=false: Alt+M is inert, the picker never opens (D11)", () => {
+  test("modelSwitch=false: Ctrl+L is inert, the picker never opens (D11)", () => {
     const overlay = makeOverlay({
       features: { rightClickCopyPaste: true, modelSwitch: false, retry: true },
       modelRegistry: makeRegistry(available, ["model-a"]),
     });
-    overlay.handleInput(ALT_M);
+    overlay.handleInput(CTRL_L);
     expect(picker(overlay)).toBeNull();
     // The fork keeps its current model.
     expect(agentState(overlay).model.id).toBe("current-model");
   });
   test("after a model switch, the next turn's framing names the new model (self-report)", async () => {
     // Regression: the framing block carries `Model: {{model}}`, substituted at
-    // open time with the MAIN session's model. Alt+M switches the fork's
+    // open time with the MAIN session's model. Ctrl+L switches the fork's
     // runtime model but the framing text stayed stale, so asking the agent
     // "what model are you" answered with the old one. Every turn re-substitutes
     // the framing block with the current fork model.
@@ -417,7 +417,7 @@ describe("side-chat-overlay model picker", () => {
         return fakeRunner;
       },
     });
-    // Switch the fork model the way Alt+M confirm does.
+    // Switch the fork model the way Ctrl+L confirm does.
     const st = (overlay as any).runner.agent.state;
     st.model = makeModel("glm-new", false);
     // Submit through the editor (the overlay's public submit path).
@@ -436,16 +436,16 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
   const base = {
     scrollHint: "Pg/Scr ↑↓",
     escHint: "Esc close",
-    modeHint: "Ctrl+T edit",
+    modeHint: "Alt+T edit",
   };
 
-  test("all features on: right-click and Alt+M are advertised", () => {
+  test("all features on: right-click and Ctrl+L are advertised", () => {
     const [primary, secondary] = buildSideChatHintLines({
       ...base,
       features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
     });
     expect(primary).toContain("R-click copy/paste");
-    expect(secondary).toContain("A+m model");
+    expect(secondary).toContain("C+l model");
   });
 
   test("rightClickCopyPaste=false: the right-click hint is dropped, hotkey hint stays", () => {
@@ -457,12 +457,12 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
     expect(primary).toContain("C+c copy");
   });
 
-  test("modelSwitch=false: the Alt+M hint is dropped, other Alt-actions stay", () => {
+  test("modelSwitch=false: the Ctrl+L hint is dropped, other Alt-actions stay", () => {
     const [, secondary] = buildSideChatHintLines({
       ...base,
       features: { rightClickCopyPaste: true, modelSwitch: false, retry: true },
     });
-    expect(secondary).not.toContain("A+m");
+    expect(secondary).not.toContain("C+l");
     expect(secondary).toContain("A+w bg");
   });
 });

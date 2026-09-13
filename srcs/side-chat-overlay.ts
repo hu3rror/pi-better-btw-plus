@@ -171,7 +171,7 @@ export class SideChatOverlay implements Component, Focusable {
   private forkedMessageCount: number;
   /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
   private readOnlyToolNames = new Set<string>();
-  /** Open Alt+M model picker modal, or null when closed (modal replaces the chat area). */
+  /** Open Ctrl+L model picker modal, or null when closed (modal replaces the chat area). */
   private modelPicker: SelectList | null = null;
   /** Choices backing the open picker (index-aligned with its SelectItems). */
   private modelPickerChoices: ModelChoice[] = [];
@@ -288,6 +288,41 @@ export class SideChatOverlay implements Component, Focusable {
     return true;
   }
 
+
+  /**
+   * Ctrl+X (app.message.copy parity): copy the last assistant message's text
+   * — no selection needed, mirroring the main session's "copy last assistant
+   * message" default. No-op when there is no assistant message with text.
+   */
+  async copyLastAssistantMessage(): Promise<void> {
+    const messages = this.runner.agent.state.messages;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "assistant") continue;
+      let text = msg.content
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("\n");
+      if (!text && "errorMessage" in msg && typeof msg.errorMessage === "string") {
+        text = msg.errorMessage;
+      }
+      if (!text) return;
+      try {
+        await copyToClipboard(text);
+      } catch (error) {
+        this.messages.setErrorContent(
+          `Copy failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        this.options.tui.requestRender();
+        return;
+      }
+      this.status.flash(
+        `${COPIED_STATUS_PREFIX}${Array.from(text).length} chars`,
+        COPIED_STATUS_CLEAR_MS,
+      );
+      return;
+    }
+  }
   /**
    * Right-click paste (issue #7, D4): read plain text from the system
    * clipboard via the injected platform-channel matrix (clipboard-read.ts,
@@ -422,7 +457,7 @@ export class SideChatOverlay implements Component, Focusable {
     // SGR events into actions; the overlay translates them onto the message
     // store and render loop (applyGestureAction). The hit queries bridge the
     // module's 0-based screen coordinates to the overlay's geometry. The
-    // Alt+M modal gate stays in handleMouseEvent — the module knows nothing
+    // Ctrl+L modal gate stays in handleMouseEvent — the module knows nothing
     // about the modal.
     this.gesture = new PointerGesture({
       hit: {
@@ -473,7 +508,7 @@ export class SideChatOverlay implements Component, Focusable {
         enabled: options.features.retry && options.retryPolicy.enabled,
       },
       promptPack,
-      // Live closures: Ctrl+T toggles toolMode (the runner re-reads it per
+      // Live closures: Alt+T toggles toolMode (the runner re-reads it per
       // event); the read-only tool set is fixed at open time.
       isReadOnlyLane: () => this.toolMode === "read-only",
       isReadOnlyTool: (name) => this.readOnlyToolNames.has(name),
@@ -612,7 +647,7 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
   /**
-   * Re-substitute the framing block with the fork's CURRENT model (Alt+M may
+   * Re-substitute the framing block with the fork's CURRENT model (Ctrl+L may
    * have switched `agent.state.model`, D5). The framing text is built once at
    * open time with the main session's model; the message lives in the
    * transcript (marked, never rendered as a bubble), so refreshing its content
@@ -637,7 +672,7 @@ export class SideChatOverlay implements Component, Focusable {
     if (!trimmed || this.runner.isRunning || this.disposed) return;
 
     // Keep the framing block's `Model:` line in sync with the fork's current
-    // model (Alt+M, D5): the text is substituted once at open time with the
+    // model (Ctrl+L, D5): the text is substituted once at open time with the
     // main session's model, so without this refresh the agent self-reports the
     // old model after a switch (bug #3).
     this.refreshFramingModel();
@@ -785,7 +820,7 @@ export class SideChatOverlay implements Component, Focusable {
 
     const escHint = this.runner.isRunning ? "Esc stop" : "Esc close";
     const modeHint =
-      this.toolMode === "read-only" ? "C+t Edit" : "C+t Readonly";
+      this.toolMode === "read-only" ? "A+t Edit" : "A+t Readonly";
     const scrolled = !this.messages.isAtBottom();
     const scrollHint = scrolled
       ? theme.fg(
@@ -869,7 +904,7 @@ export class SideChatOverlay implements Component, Focusable {
       this.exportChatHistory();
       return;
     }
-    if (matchesKey(data, Key.alt("m"))) {
+    if (matchesKey(data, Key.ctrl("l"))) {
       this.openModelPicker();
       return;
     }
@@ -885,7 +920,19 @@ export class SideChatOverlay implements Component, Focusable {
         return;
       }
     }
-    if (matchesKey(data, Key.ctrl("t"))) {
+    if (matchesKey(data, Key.ctrl("x"))) {
+      // app.message.copy parity: copy the last assistant message — no
+      // selection needed (mirrors the main session's Ctrl+X default).
+      void this.copyLastAssistantMessage();
+      return;
+    }
+    if (matchesKey(data, Key.ctrl("v")) || matchesKey(data, Key.alt("v"))) {
+      // app.clipboard.pasteImage parity: paste clipboard text into the editor
+      // (Ctrl+V; Alt+V is the Windows/WSL binding).
+      void this.pasteFromClipboard();
+      return;
+    }
+    if (matchesKey(data, Key.alt("t"))) {
       this.toolMode = this.toolMode === "full" ? "read-only" : "full";
       // Read-only lane keeps the strip philosophy; edit mode stays untouched
       // (enforcement out of scope until the crash bug is understood, #4).
@@ -915,14 +962,14 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
   /**
-   * Alt+M: open the fork model picker as a modal inside the overlay (D7).
+   * Ctrl+L: open the fork model picker as a modal inside the overlay (D7).
    * The list shows scoped + authenticated models, falling back to the
    * available catalogue (D6). Rejected while streaming: swapping the model
    * mid-turn would corrupt the in-flight request.
    */
   private openModelPicker(): void {
     if (this.modelPicker) return;
-    // Feature switch (D11): Alt+M is inert when model switching is off.
+    // Feature switch (D11): Ctrl+L is inert when model switching is off.
     if (!this.options.features.modelSwitch) return;
     if (this.runner.isRunning) {
       this.status.setSteady("feedback", {
@@ -1143,7 +1190,7 @@ function frameLine(
 
 /** Alt-actions hint row base; the model entry is appended only when the switch is on. */
 const ALT_ACTIONS_BASE = `A+w bg · A+r fork · A+n new · A+e export`;
-const ALT_ACTION_HINTS = `${ALT_ACTIONS_BASE} · A+m model`;
+const ALT_ACTION_HINTS = `${ALT_ACTIONS_BASE} · C+l model`;
 /**
  * Build the fixed two-row key-hint bar. Row 1: scrolling, copy, mode toggle,
  * Esc and send; row 2: the Alt-actions (Alt abbreviated as A, A+w = Alt+W).
@@ -1163,13 +1210,13 @@ export function buildSideChatHintLines(options: {
   const rightClickHint = features.rightClickCopyPaste
     ? " · R-click copy/paste"
     : "";
-  const primary = `${scrollHint} · C+c copy${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
-  const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? " · A+m model" : ""}`;
+  const primary = `${scrollHint} · C+c copy · C+x last · C+v paste${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
+  const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? " · C+l model" : ""}`;
   return [primary, secondary];
 }
 
 /**
- * Hint bar while the Alt+M model picker modal is open: row 1 switches to
+ * Hint bar while the Ctrl+L model picker modal is open: row 1 switches to
  * the picker keys, row 2 keeps the Alt-actions (still two rows, so the
  * message-area height stays stable).
  */

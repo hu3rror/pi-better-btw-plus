@@ -98,7 +98,7 @@ export interface PointerGestureOptions {
 
 /**
  * Pointer gesture state machine. One instance per overlay; `onEvent` is
- * called for every SGR event routed to the overlay (the Alt+M modal gate
+ * called for every SGR event routed to the overlay (the Ctrl+L modal gate
  * lives in the overlay, the module knows nothing about the modal).
  */
 export class PointerGesture {

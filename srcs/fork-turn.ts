@@ -71,7 +71,7 @@ export interface ForkTurnRunnerOptions {
   retryPolicy: RetryPolicy;
   /** Resolved prompt texts (focus anchor + lane reminders). */
   promptPack: PromptPack;
-  /** Live lane predicate (tool-mode closure; live after Ctrl+T). */
+  /** Live lane predicate (tool-mode closure; live after Alt+T). */
   isReadOnlyLane: () => boolean;
   /** Read-only tool-set membership (tool-set closure). */
   isReadOnlyTool: (name: string) => boolean;
@@ -82,7 +82,7 @@ export interface ForkTurnRunnerOptions {
 }
 
 export class ForkTurnRunner {
-  /** The owned fork agent; the overlay reaches it for model picker / export / Ctrl+T. */
+  /** The owned fork agent; the overlay reaches it for model picker / export / Alt+T. */
   readonly agent: Agent;
 
   /** Out-of-lane attempts in the current turn (reset at the top of run()). */

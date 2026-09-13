@@ -8,6 +8,7 @@ import type { OverlayHandle, Terminal, TUI } from "@earendil-works/pi-tui";
 import {
   buildSessionContext,
   ExtensionRunner,
+  wrapRegisteredTools,
 } from "@earendil-works/pi-coding-agent";
 import { FileActivityTracker } from "./file-activity-tracker.ts";
 import { loadConfig, loadRetryPolicy } from "./config.ts";
@@ -45,23 +46,9 @@ if (!(ExtensionRunner.prototype as unknown as Record<symbol, unknown>)[RUNNER_CA
 
 function getExtensionAgentTools(): AgentTool[] {
   if (!capturedRunner) return [];
-  return capturedRunner.getAllRegisteredTools().map((rt): AgentTool => {
-    const { definition } = rt;
-    return {
-      name: definition.name,
-      label: definition.label,
-      description: definition.description,
-      parameters: definition.parameters,
-      execute: (toolCallId, params, signal, onUpdate) =>
-        definition.execute(
-          toolCallId,
-          params,
-          signal,
-          onUpdate,
-          capturedRunner!.createContext(),
-        ),
-    };
-  });
+  // pi's official RegisteredTool → AgentTool adapter (runner.createContext() +
+  // dynamic-tool `addedToolNames` tracking) — replaces the hand-rolled mapping.
+  return wrapRegisteredTools(capturedRunner.getAllRegisteredTools(), capturedRunner);
 }
 
 const OVERLAY_BLOCKED_ERROR = "PI_SIDE_CHAT_OVERLAY_BLOCKED";

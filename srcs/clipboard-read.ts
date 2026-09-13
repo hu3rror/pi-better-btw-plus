@@ -4,10 +4,13 @@
  *
  * The write side is pi's own `copyToClipboard` (public export); the read side
  * is self-built because `readClipboardText` is not re-exported from the
- * package entry. Each platform maps to a primary channel:
+ * package entry. The PRIMARY channel mirrors pi's own `readClipboardText` (the
+ * `@mariozechner/clipboard` native addon); the remaining channels — PowerShell
+ * `Get-Clipboard -Raw` (win32), `pbpaste` (darwin), and an OSC 52 query — are
+ * extension-only fallbacks pi's read side does not have:
  *
- *   - win32  → native addon `getText` (pi's own clipboard read), then
- *     PowerShell `Get-Clipboard -Raw`, then an OSC 52 query;
+ *   - win32  → native addon `getText`, then PowerShell `Get-Clipboard -Raw`,
+ *     then an OSC 52 query;
  *   - darwin → native addon `getText`, then `pbpaste`, then OSC 52 query;
  *   - linux  → OSC 52 query (`\x1b]52;c;?\x07`, read the reply).
  *
@@ -124,11 +127,11 @@ export interface CommandChannelOptions {
 }
 
 /**
- * PowerShell channel: `powershell.exe -NoProfile -Command "Get-Clipboard
- * -Raw"`, mirroring pi's clipboard-image PowerShell channel family. The
- * `-Raw` flag preserves the exact text (no extra newline), and the output
- * encoding is pinned to UTF-8 because the text travels over the console
- * pipe (pi's image reader sidesteps this by writing a temp file).
+ * PowerShell read fallback (extension-only; pi's readClipboardText has no
+ * PowerShell channel): `powershell.exe -NoProfile -Command "Get-Clipboard
+ * -Raw"`. The `-Raw` flag preserves the exact text (no extra newline), and the
+ * output encoding is pinned to UTF-8 because the text travels over the console
+ * pipe.
  */
 const PS_GET_CLIPBOARD_SCRIPT =
   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw";
@@ -244,11 +247,11 @@ export function makeNativeChannel(
 }
 
 /**
- * PowerShell channel: `powershell.exe -NoProfile -Command "Get-Clipboard
- * -Raw"`, mirroring pi's clipboard-image PowerShell channel family. The
- * `-Raw` flag preserves the exact text (no extra newline), and the output
- * encoding is pinned to UTF-8 because the text travels over the console
- * pipe (pi's image reader sidesteps this by writing a temp file).
+ * PowerShell read fallback (extension-only; pi's readClipboardText has no
+ * PowerShell channel): `powershell.exe -NoProfile -Command "Get-Clipboard
+ * -Raw"`. The `-Raw` flag preserves the exact text (no extra newline), and the
+ * output encoding is pinned to UTF-8 because the text travels over the console
+ * pipe.
  */
 export function makePowerShellChannel(
   options: CommandChannelOptions = {},
