@@ -107,17 +107,20 @@ export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPoli
   // detected from the (already-migrated) per-scope settings; an absent block
   // keeps `provider` undefined so the overlay's stream assembly stays identity
   // (D3: unconfigured users keep the bare streamSimple, zero overhead).
-  const provider = settings.getProviderRetrySettings();
+  const providerRetry = settings.getProviderRetrySettings();
   const providerConfigured = [
     settings.getGlobalSettings(),
     settings.getProjectSettings(),
   ].some((scope) => isPlainRecord(scope.retry) && isPlainRecord(scope.retry.provider));
   const providerBlock: ProviderRetrySettings = {};
   if (providerConfigured) {
-    if (typeof provider.timeoutMs === "number") providerBlock.timeoutMs = provider.timeoutMs;
-    if (typeof provider.maxRetries === "number") providerBlock.maxRetries = provider.maxRetries;
-    if (typeof provider.maxRetryDelayMs === "number")
-      providerBlock.maxRetryDelayMs = provider.maxRetryDelayMs;
+    // Number filter kept (vs. blindly forwarding getProviderRetrySettings) to
+    // keep the D3 identity contract stable: non-number keys never reach
+    // injectProviderRetry, and an unconfigured provider stays undefined.
+    if (typeof providerRetry.timeoutMs === "number") providerBlock.timeoutMs = providerRetry.timeoutMs;
+    if (typeof providerRetry.maxRetries === "number") providerBlock.maxRetries = providerRetry.maxRetries;
+    if (typeof providerRetry.maxRetryDelayMs === "number")
+      providerBlock.maxRetryDelayMs = providerRetry.maxRetryDelayMs;
   }
   return {
     enabled: retry.enabled,

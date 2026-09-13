@@ -62,7 +62,7 @@ import {
   modelKey,
   type ModelChoice,
 } from "./model-switch.ts";
-import { SIDE_CHAT_SHORTCUT } from "./shortcuts.ts";
+import { KEYBINDINGS, matchesAnyKey } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 import type { SideChatFeatures } from "./config.ts";
 import type { RetryPolicy } from "./retry.ts";
@@ -132,6 +132,8 @@ const PASTE_FAILED_STATUS = "Clipboard read failed";
 /** Hint when the clipboard is readable but holds no text. */
 const PASTE_EMPTY_STATUS = "Clipboard is empty";
 const PASTE_STATUS_CLEAR_MS = 1200;
+/** Ctrl+X hint when the side chat has produced no assistant reply yet. */
+const NO_ASSISTANT_MESSAGE_STATUS = "No assistant message to copy in this turn";
 
 /**
  * Shared-prefix layout (#9, reverses decision #6): the main lane's system
@@ -274,6 +276,16 @@ export class SideChatOverlay implements Component, Focusable {
   async copySelectionToClipboard(): Promise<boolean> {
     const text = this.messages.getSelectedText();
     if (!text) return false;
+    return this.copyTextWithFeedback(text);
+  }
+
+  /**
+   * Copy text to the system clipboard and surface the outcome: a success
+   * flash on the status line (labelled by `hint`) or an error line on
+   * failure. The shared skeleton behind selection copy (Ctrl+C / right-click)
+   * and last-message copy (Ctrl+X).
+   */
+  private async copyTextWithFeedback(text: string, hint?: string): Promise<boolean> {
     try {
       await copyToClipboard(text);
     } catch (error) {
@@ -283,45 +295,25 @@ export class SideChatOverlay implements Component, Focusable {
       this.options.tui.requestRender();
       return false;
     }
-    const status = `${COPIED_STATUS_PREFIX}${Array.from(text).length} chars`;
-    this.status.flash(status, COPIED_STATUS_CLEAR_MS);
+    const label = hint
+      ? `${hint} · ${Array.from(text).length} chars`
+      : `${Array.from(text).length} chars`;
+    this.status.flash(`${COPIED_STATUS_PREFIX}${label}`, COPIED_STATUS_CLEAR_MS);
     return true;
   }
 
-
   /**
-   * Ctrl+X (app.message.copy parity): copy the last assistant message's text
-   * — no selection needed, mirroring the main session's "copy last assistant
-   * message" default. No-op when there is no assistant message with text.
+   * Ctrl+X (app.message.copy parity): copy the last assistant message the
+   * side chat produced itself — never the forked main-lane context. No-op
+   * with a hint when the side chat has produced no reply yet.
    */
   async copyLastAssistantMessage(): Promise<void> {
-    const messages = this.runner.agent.state.messages;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role !== "assistant") continue;
-      let text = msg.content
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("\n");
-      if (!text && "errorMessage" in msg && typeof msg.errorMessage === "string") {
-        text = msg.errorMessage;
-      }
-      if (!text) return;
-      try {
-        await copyToClipboard(text);
-      } catch (error) {
-        this.messages.setErrorContent(
-          `Copy failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        this.options.tui.requestRender();
-        return;
-      }
-      this.status.flash(
-        `${COPIED_STATUS_PREFIX}${Array.from(text).length} chars`,
-        COPIED_STATUS_CLEAR_MS,
-      );
+    const text = this.runner.getLastAssistantText({ onlyCurrentTurn: true });
+    if (!text) {
+      this.status.flash(NO_ASSISTANT_MESSAGE_STATUS, COPIED_STATUS_CLEAR_MS);
       return;
     }
+    await this.copyTextWithFeedback(text, "last message");
   }
   /**
    * Right-click paste (issue #7, D4): read plain text from the system
@@ -820,7 +812,9 @@ export class SideChatOverlay implements Component, Focusable {
 
     const escHint = this.runner.isRunning ? "Esc stop" : "Esc close";
     const modeHint =
-      this.toolMode === "read-only" ? "A+t Edit" : "A+t Readonly";
+      this.toolMode === "read-only"
+        ? `${KEYBINDINGS.toggleMode.hint} Edit`
+        : `${KEYBINDINGS.toggleMode.hint} Readonly`;
     const scrolled = !this.messages.isAtBottom();
     const scrollHint = scrolled
       ? theme.fg(
@@ -868,7 +862,7 @@ export class SideChatOverlay implements Component, Focusable {
 
   handleInput(data: string): void {
     // Backgrounding (Alt+W) while the picker is open cancels the modal first.
-    if (matchesKey(data, SIDE_CHAT_SHORTCUT)) {
+    if (matchesAnyKey(data, KEYBINDINGS.background.keys)) {
       this.closeModelPicker();
       this.options.onBackground();
       return;
@@ -892,26 +886,23 @@ export class SideChatOverlay implements Component, Focusable {
       }
       return;
     }
-    if (matchesKey(data, Key.alt("r"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.refork.keys)) {
       this.dispose("refork");
       return;
     }
-    if (matchesKey(data, Key.alt("n"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.clear.keys)) {
       this.dispose("clear");
       return;
     }
-    if (matchesKey(data, Key.alt("e"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.export.keys)) {
       this.exportChatHistory();
       return;
     }
-    if (matchesKey(data, Key.ctrl("l"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.modelPicker.keys)) {
       this.openModelPicker();
       return;
     }
-    if (
-      matchesKey(data, Key.ctrl("c")) ||
-      matchesKey(data, Key.ctrlShift("c"))
-    ) {
+    if (matchesAnyKey(data, KEYBINDINGS.copySelection.keys)) {
       // Hotkey copy: with an active mouse selection, Ctrl+C / Ctrl+Shift+C
       // copies it. Without one, fall through so Ctrl+C keeps the editor's
       // own semantics.
@@ -920,19 +911,19 @@ export class SideChatOverlay implements Component, Focusable {
         return;
       }
     }
-    if (matchesKey(data, Key.ctrl("x"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.copyLastMessage.keys)) {
       // app.message.copy parity: copy the last assistant message — no
       // selection needed (mirrors the main session's Ctrl+X default).
       void this.copyLastAssistantMessage();
       return;
     }
-    if (matchesKey(data, Key.ctrl("v")) || matchesKey(data, Key.alt("v"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.paste.keys)) {
       // app.clipboard.pasteImage parity: paste clipboard text into the editor
       // (Ctrl+V; Alt+V is the Windows/WSL binding).
       void this.pasteFromClipboard();
       return;
     }
-    if (matchesKey(data, Key.alt("t"))) {
+    if (matchesAnyKey(data, KEYBINDINGS.toggleMode.keys)) {
       this.toolMode = this.toolMode === "full" ? "read-only" : "full";
       // Read-only lane keeps the strip philosophy; edit mode stays untouched
       // (enforcement out of scope until the crash bug is understood, #4).
@@ -1189,8 +1180,13 @@ function frameLine(
 }
 
 /** Alt-actions hint row base; the model entry is appended only when the switch is on. */
-const ALT_ACTIONS_BASE = `A+w bg · A+r fork · A+n new · A+e export`;
-const ALT_ACTION_HINTS = `${ALT_ACTIONS_BASE} · C+l model`;
+const ALT_ACTIONS_BASE = [
+  KEYBINDINGS.background.hint,
+  KEYBINDINGS.refork.hint,
+  KEYBINDINGS.clear.hint,
+  KEYBINDINGS.export.hint,
+].join(" · ");
+const ALT_ACTION_HINTS = `${ALT_ACTIONS_BASE} · ${KEYBINDINGS.modelPicker.hint}`;
 /**
  * Build the fixed two-row key-hint bar. Row 1: scrolling, copy, mode toggle,
  * Esc and send; row 2: the Alt-actions (Alt abbreviated as A, A+w = Alt+W).
@@ -1210,8 +1206,8 @@ export function buildSideChatHintLines(options: {
   const rightClickHint = features.rightClickCopyPaste
     ? " · R-click copy/paste"
     : "";
-  const primary = `${scrollHint} · C+c copy · C+x last · C+v paste${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
-  const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? " · C+l model" : ""}`;
+  const primary = `${scrollHint} · ${KEYBINDINGS.copySelection.hint} · ${KEYBINDINGS.copyLastMessage.hint} · ${KEYBINDINGS.paste.hint}${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
+  const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? ` · ${KEYBINDINGS.modelPicker.hint}` : ""}`;
   return [primary, secondary];
 }
 

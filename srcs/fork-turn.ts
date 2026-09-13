@@ -85,6 +85,11 @@ export class ForkTurnRunner {
   /** The owned fork agent; the overlay reaches it for model picker / export / Alt+T. */
   readonly agent: Agent;
 
+  /** Transcript length at construction (forked context + framing block). The
+   * `onlyCurrentTurn` boundary in getLastAssistantText: messages at or after
+   * this index are the side chat's own turns. */
+  private readonly initialMessageCount: number;
+
   /** Out-of-lane attempts in the current turn (reset at the top of run()). */
   private laneViolations = 0;
   /** Reminder queued for injection by transformContext before the next LLM call. */
@@ -105,6 +110,7 @@ export class ForkTurnRunner {
       beforeToolCall: (context) => this.beforeToolCall(context),
       afterToolCall: (context) => this.afterToolCall(context),
     });
+    this.initialMessageCount = this.agent.state.messages.length;
     this.agent.subscribe((event) => this.handleAgentEvent(event));
   }
 
@@ -175,6 +181,31 @@ export class ForkTurnRunner {
   cancel(): void {
     this.retryAbortController?.abort();
     this.agent.abort();
+  }
+
+  /**
+   * The text of the last assistant message (text blocks joined, or its
+   * errorMessage for an error stop). `onlyCurrentTurn` restricts the search to
+   * messages the side chat produced itself (index ≥ the fork's initial
+   * transcript) — never the forked main-lane context. Undefined when no such
+   * assistant message has text.
+   */
+  getLastAssistantText(options: { onlyCurrentTurn?: boolean } = {}): string | undefined {
+    const messages = this.agent.state.messages;
+    const start = options.onlyCurrentTurn ? this.initialMessageCount : 0;
+    for (let i = messages.length - 1; i >= start; i--) {
+      const msg = messages[i];
+      if (msg.role !== "assistant") continue;
+      let text = msg.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      if (!text && "errorMessage" in msg && typeof msg.errorMessage === "string") {
+        text = msg.errorMessage;
+      }
+      if (text) return text;
+    }
+    return undefined;
   }
 
   // --- Agent event → phase translation --------------------------------------

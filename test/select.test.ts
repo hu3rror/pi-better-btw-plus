@@ -287,27 +287,41 @@ describe("side-chat-overlay.ts", () => {
     await tick();
   });
 
-  test("ctrl+x copies the last assistant message (app.message.copy parity)", async () => {
+  test("ctrl+x copies the last side-chat assistant message (app.message.copy parity)", async () => {
     const overlay = makeOverlay(undefined, {
       runnerFactory: () =>
         ({
-          agent: {
-            state: {
-              model: { id: "m", reasoning: false },
-              thinkingLevel: "off",
-              messages: [
-                { role: "user", content: "hi" },
-                { role: "assistant", content: [{ type: "text", text: "last reply" }] },
-              ],
-            },
-          },
+          agent: { state: { model: { id: "m", reasoning: false }, thinkingLevel: "off", messages: [] } },
           isRunning: false,
           run: async () => {},
           cancel: () => {},
+          getLastAssistantText: () => "last reply",
         }) as any,
     });
     overlay.handleInput("\x18"); // raw Ctrl+X terminal byte
     await tick();
     expect(copiedTexts()).toEqual(["last reply"]);
+  });
+
+  test("ctrl+x with no side-chat reply flashes a hint and copies nothing", async () => {
+    const overlay = makeOverlay(undefined, {
+      runnerFactory: () =>
+        ({
+          agent: { state: { model: { id: "m", reasoning: false }, thinkingLevel: "off", messages: [] } },
+          isRunning: false,
+          run: async () => {},
+          cancel: () => {},
+          getLastAssistantText: () => undefined,
+        }) as any,
+    });
+    overlay.handleInput("\x18");
+    await tick();
+    expect(copiedTexts()).toEqual([]);
+    const M: any = (overlay as any).messages;
+    expect(
+      M.render(80).some((l: string) =>
+        l.includes("No assistant message to copy in this turn"),
+      ),
+    ).toBe(true);
   });
 });
