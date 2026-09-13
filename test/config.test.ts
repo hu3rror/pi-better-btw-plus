@@ -481,6 +481,61 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // --- Malformed turn-layer keys (contract: pi semantics pass through) ---
+  // loadRetryPolicy forwards pi's getRetrySettings() values verbatim — no
+  // re-validation. pi defaults only on undefined (`?? 3`), so a malformed
+  // value ("15", "abc", "false") flows through untouched, matching the main
+  // session's behavior on the same config. Re-adding a type guard here would
+  // silently fork the side chat's retry behavior from pi's — these tests pin
+  // the pass-through contract (code-review #3, decision: no guard).
+
+  test("malformed numeric retry keys pass through verbatim (pi getRetrySettings semantics)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { maxRetries: "15", baseDelayMs: "abc" } },
+    });
+    try {
+      const policy = tree.load();
+      expect(policy.maxRetries as unknown).toBe("15");
+      expect(policy.baseDelayMs as unknown).toBe("abc");
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("non-boolean enabled passes through verbatim (pi _prepareRetry truthiness)", () => {
+    const tree = makeRetryTree({ global: { retry: { enabled: "false" } } });
+    try {
+      expect(tree.load().enabled as unknown).toBe("false");
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("zero is a valid retry value (?? defaults only undefined, not falsy)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { maxRetries: 0, baseDelayMs: 0 } },
+    });
+    try {
+      expect(tree.load().maxRetries).toBe(0);
+      expect(tree.load().baseDelayMs).toBe(0);
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("present retry block with missing keys falls back to pi defaults", () => {
+    const tree = makeRetryTree({ global: { retry: { enabled: true } } });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 3,
+        baseDelayMs: 2000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
 });
 
 /**
