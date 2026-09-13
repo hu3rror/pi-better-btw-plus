@@ -184,15 +184,14 @@ export class ForkTurnRunner {
   }
 
   /**
-   * The text of the last assistant message (text blocks joined, or its
-   * errorMessage for an error stop). `sinceFork` restricts the search to the
-   * side chat's own messages (at or after the fork boundary) — never the
-   * inherited forked context. Undefined when no such assistant message has
-   * text.
+   * The text of the last assistant message the side chat produced itself
+   * (text blocks joined, or its errorMessage for an error stop) — searched
+   * from the fork boundary, never reaching back into the inherited forked
+   * context. Undefined when no such assistant message has text.
    */
-  getLastAssistantText(options: { sinceFork?: boolean } = {}): string | undefined {
+  getLastAssistantText(): string | undefined {
     const messages = this.agent.state.messages;
-    const start = options.sinceFork ? this.forkBoundaryIndex : 0;
+    const start = this.forkBoundaryIndex;
     for (let i = messages.length - 1; i >= start; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;

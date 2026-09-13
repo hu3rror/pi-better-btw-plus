@@ -308,7 +308,7 @@ export class SideChatOverlay implements Component, Focusable {
    * with a hint when the side chat has produced no reply yet.
    */
   async copyLastAssistantMessage(): Promise<void> {
-    const text = this.runner.getLastAssistantText({ sinceFork: true });
+    const text = this.runner.getLastAssistantText();
     if (!text) {
       this.status.flash(NO_ASSISTANT_MESSAGE_STATUS, COPIED_STATUS_CLEAR_MS);
       return;

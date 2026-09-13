@@ -536,7 +536,7 @@ describe("fork-turn: run lifecycle (T1)", () => {
 });
 
 describe("fork-turn: getLastAssistantText", () => {
-  test("sinceFork skips the forked context and reads the side chat's own reply", () => {
+  test("skips the forked context and reads the side chat's own reply", () => {
     const fake = makeFakeAgent([]);
     // Seed the forked main-lane context before the runner captures the
     // initial-transcript boundary.
@@ -546,29 +546,21 @@ describe("fork-turn: getLastAssistantText", () => {
     );
     const { runner } = makeHarness(fake);
     // No side-chat reply yet → undefined (never falls back to the fork context).
-    expect(runner.getLastAssistantText({ sinceFork: true })).toBeUndefined();
+    expect(runner.getLastAssistantText()).toBeUndefined();
     fake.state.messages.push(
       { role: "assistant", content: [{ type: "text", text: "btw reply" }], stopReason: "stop" },
     );
-    expect(runner.getLastAssistantText({ sinceFork: true })).toBe("btw reply");
+    expect(runner.getLastAssistantText()).toBe("btw reply");
   });
 
-  test("without sinceFork the whole transcript is searched", () => {
-    const fake = makeFakeAgent([]);
-    fake.state.messages.push(
-      { role: "user", content: "q", timestamp: 1 },
-      { role: "assistant", content: [{ type: "text", text: "main reply" }], stopReason: "stop" },
-    );
-    const { runner } = makeHarness(fake);
-    expect(runner.getLastAssistantText()).toBe("main reply");
-  });
 
   test("an error-stop assistant message returns its errorMessage", () => {
     const fake = makeFakeAgent([]);
+    const { runner } = makeHarness(fake);
+    // The error-stop message lands after the fork boundary (a real turn).
     fake.state.messages.push(
       { role: "assistant", content: [], stopReason: "error", errorMessage: "boom" },
     );
-    const { runner } = makeHarness(fake);
     expect(runner.getLastAssistantText()).toBe("boom");
   });
 });
