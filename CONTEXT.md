@@ -21,8 +21,11 @@ _Avoid_: "the fork history" (that would blur it with the messages the side chat 
 
 **Fork boundary**:
 The line in the fork's transcript where the inherited forked context ends and the
-side chat's own messages begin. The `since_fork` anchor and last-message copy
-both key off this line; refork/clear draw a fresh boundary with the new fork.
+side chat's own messages begin: the transcript length at fork creation (forked
+context + framing block). It is the fork-side counterpart of the `since_fork`
+anchor, which marks the same moment on the main lane. Last-message copy
+searches only at/after this line; refork/clear draw a fresh boundary with the
+new fork.
 _Avoid_: "current turn" — a turn is one submit→response; this line crosses turns.
 
 **Refork** (Alt+R):
