@@ -77,6 +77,7 @@ Press `Esc` to close it. Reopen with `/btw` or `Alt+W` to continue where you lef
 | `Alt+N` | Start an empty conversation |
 | `Alt+E` | Export the transcript to `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
 | `Ctrl+L` | Open the fork model picker (scoped + authenticated models; `↑/↓` select, `Enter` confirm, `Esc` cancel) |
+| `Alt+Shift+C` | Copy the whole input editor text (paste markers expanded — exactly what a submit would send) |
 
 In Read-only Mode (default), the read-only lane is **enforced**: attempting an out-of-lane tool call is hard-blocked with a prompt injection; a second violation escalates the wording and aborts the turn (a `🚧 lane blocked` status line). Executed-but-failed read-only calls are re-grounded by an `afterToolCall` note. Edit mode (`Alt+T`) is unaffected.
 
@@ -121,6 +122,7 @@ What changed since I opened this side chat?
 | Double-click | Select the whole rendered line |
 | `Ctrl+C` / `Ctrl+Shift+C` | Copy the active mouse selection (the selection is kept until you click elsewhere, so repeated presses re-copy) |
 | `Ctrl+X` | Copy the last assistant message |
+| `Alt+Shift+C` | Copy the whole input editor text (paste markers expanded — exactly what a submit would send; empty input shows `Input is empty`) |
 | `Ctrl+V` / `Alt+V` | Paste the system clipboard at the cursor (same normalization + `[paste #N …]` markers as right-click paste) |
 | Mouse right-click (chat area) | Copy the retained mouse selection (fires on release, keeps the highlight) |
 | Mouse right-click (input editor) | Paste the system clipboard at the cursor (editor normalization + `[paste #N …]` markers for large pastes) |
@@ -217,7 +219,7 @@ Structure:
 │   ├── side-chat-mouse.ts    # minimal SGR mouse parsing
 │   ├── clipboard-read.ts    # platform clipboard read (win32 / darwin / linux + OSC 52 fallback)
 │   ├── retry.ts             # turn-level retry: classifyRetryable + runWithRetry
-│   ├── shortcuts.ts         # hotkey bindings (Alt+W / Alt+T)
+│   ├── shortcuts.ts         # hotkey bindings (Alt+W bg / Alt+T mode / Alt+Shift+C copy input)
 │   ├── model-switch.ts       # Ctrl+L fork model picker: list building + thinking clamp
 │   ├── side-chat-export.ts   # Alt+E transcript export
 │   ├── tool-wrapper.ts       # write-path overlap warnings

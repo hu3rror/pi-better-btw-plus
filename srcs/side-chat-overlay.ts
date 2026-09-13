@@ -134,6 +134,8 @@ const PASTE_EMPTY_STATUS = "Clipboard is empty";
 const PASTE_STATUS_CLEAR_MS = 1200;
 /** Ctrl+X hint when the side chat has produced no assistant reply yet. */
 const NO_ASSISTANT_MESSAGE_STATUS = "No assistant message to copy yet";
+/** Alt+Shift+C hint when the input editor is empty (issue #23). */
+const INPUT_EMPTY_STATUS = "Input is empty";
 
 /**
  * Shared-prefix layout (#9, reverses decision #6): the main lane's system
@@ -908,6 +910,19 @@ export class SideChatOverlay implements Component, Focusable {
       this.openModelPicker();
       return;
     }
+    if (matchesAnyKey(data, KEYBINDINGS.copyInput.keys)) {
+      // Copy the whole input editor text (issue #23): expanded paste
+      // markers — exactly what a submit would send. Read-only, unlike
+      // Ctrl+C's clear lane it never touches the draft; an empty input
+      // flashes a hint instead of copying.
+      const text = this.editor.getExpandedText();
+      if (!text) {
+        this.status.flash(INPUT_EMPTY_STATUS, COPIED_STATUS_CLEAR_MS);
+        return;
+      }
+      void this.copyTextWithFeedback(text, "input");
+      return;
+    }
     if (matchesAnyKey(data, KEYBINDINGS.copySelection.keys)) {
       // Hotkey copy: with an active mouse selection, Ctrl+C / Ctrl+Shift+C
       // copies it. Without one, Ctrl+C clears the input box (pi `app.clear`
@@ -1218,7 +1233,7 @@ export function buildSideChatHintLines(options: {
   const rightClickHint = features.rightClickCopyPaste
     ? " · R-click copy/paste"
     : "";
-  const primary = `${scrollHint} · ${KEYBINDINGS.copySelection.hint} · ${KEYBINDINGS.copyLastMessage.hint} · ${KEYBINDINGS.paste.hint}${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
+  const primary = `${scrollHint} · ${KEYBINDINGS.copySelection.hint} · ${KEYBINDINGS.copyLastMessage.hint} · ${KEYBINDINGS.copyInput.hint} · ${KEYBINDINGS.paste.hint}${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
   const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? ` · ${KEYBINDINGS.modelPicker.hint}` : ""}`;
   return [primary, secondary];
 }

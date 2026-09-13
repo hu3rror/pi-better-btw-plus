@@ -36,6 +36,8 @@ export const KEYBINDINGS = {
   copySelection: { keys: ["ctrl+c", "ctrl+shift+c"], hint: "C+c copy/clear" },
   /** Copy the last side-chat assistant message (pi `app.message.copy` parity). */
   copyLastMessage: { keys: ["ctrl+x"], hint: "C+x last" },
+  /** Copy all input editor text (expanded paste markers — submit semantics). */
+  copyInput: { keys: ["alt+shift+c"], hint: "A+⇧C all" },
   /** Paste clipboard text (pi `app.clipboard.pasteImage` parity). */
   paste: { keys: ["ctrl+v", "alt+v"], hint: "C+v paste" },
 } as const satisfies Record<string, Keybinding>;

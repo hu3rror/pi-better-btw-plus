@@ -460,6 +460,14 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
     expect(secondary).toContain("C+l model");
   });
 
+  test("copy-input hotkey is advertised in the primary hint row", () => {
+    const [primary] = buildSideChatHintLines({
+      ...base,
+      features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
+    });
+    expect(primary).toContain("A+⇧C all");
+  });
+
   test("rightClickCopyPaste=false: the right-click hint is dropped, hotkey hint stays", () => {
     const [primary] = buildSideChatHintLines({
       ...base,

@@ -39,6 +39,18 @@ issue #1（spec）的验收清单。对应 SPEC.md「Testing Decisions → 手�
 
 > 读取失败（平台通道与 OSC 52 回退全部不可用）→ `Clipboard read failed`，编辑器不变。win32 平台通道是 `Get-Clipboard -Raw`，通常只在 PowerShell 被禁用/降级时走到失败分支，可用单测覆盖代替。
 
+
+## B2. Alt+Shift+C 复制输入（issue #23）
+
+1. 输入多行文本 → `Alt+Shift+C` → 状态行 `✓ Copied · input · N chars`，剪贴板为完整文本（多行保留），输入内容不变
+2. 右键/`Ctrl+V` 粘贴 >10 行 → 出现 `[paste #N +X lines]` 标记 → `Alt+Shift+C` → 剪贴板为展开后的完整文本（不是标记字符串）
+3. 清空输入框 → `Alt+Shift+C` → 状态行 `Input is empty`，剪贴板不变
+4. 聊天区已有鼠标选区时 → `Alt+Shift+C` → 选区不受影响（可继续 `Ctrl+C` 复制选区）
+5. 流式（agent 回复中）→ `Alt+Shift+C` → 仍可复制
+6. `Ctrl+L` 模型选择器打开时 → `Alt+Shift+C` 不生效（模态接管键盘）
+7. 回归：`Ctrl+C`（无选中清空输入）、`Ctrl+X`（复制最后消息）不受影响
+
+> 依赖终端 kitty keyboard protocol（Windows Terminal ≥ 1.19 默认启用）：legacy ESC+C 序列无法被解析为 Alt+Shift+C。
 ## C. Ctrl+L 模型切换
 
 1. `Ctrl+L` → 列表打开，只含 scoped（`--models` / `enabledModels`）或可用目录中**已配置认证**的模型
@@ -107,7 +119,7 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 - 拖选松开鼠标**不自动复制**（复制只走右键/热键）
 - 滚轮滚动、`PgUp`/`PgDn`、双击选行仍正常
 - `Esc` 空闲关闭、`Alt+R` refork、`Alt+N` clear、`Alt+E` 导出正常
-- 提示栏两行仍在：`… · C+c copy · C+x last · C+v paste · R-click copy/paste · …` 与 `A+w bg · A+r fork · A+n new · A+e export · C+l model`
+- 提示栏两行仍在：`… · C+c copy · C+x last · A+⇧C all · C+v paste · R-click copy/paste · …` 与 `A+w bg · A+r fork · A+n new · A+e export · C+l model`
 
 ## 故障排查
 
@@ -132,5 +144,6 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 | E 背景化 | ☐ | |
 | F 配置开关 | ☐ | |
 | G 回归 | ☐ | |
+| H 复制输入 | ☐ | |
 
 全部通过后关闭 issue #1。

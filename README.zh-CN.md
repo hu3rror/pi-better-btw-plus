@@ -79,6 +79,7 @@ pi install npm:pi-better-btw-plus
 | `Alt+N` | 开始空白对话 |
 | `Alt+E` | 导出对话记录到 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
 | `Ctrl+L` | 打开 fork 模型选择器（scoped + 已认证模型；`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
+| `Alt+Shift+C` | 复制输入编辑器全部文本（paste 标记展开——与提交给 agent 的内容一致） |
 
 在Readonly Mode(default),只读车道是**强制的**：越权调用工具会被硬阻断并注入prompt；第二次违规会升级措辞并中止该轮，提示（`🚧 lane blocked` 状态行）。已执行但失败的只读调用会被 `afterToolCall` 备注再次归位。编辑模式（`Alt+T`）不受影响。
 
@@ -122,6 +123,7 @@ What changed since I opened this side chat?
 | 双击 | 选择整行 |
 | `Ctrl+C` / `Ctrl+Shift+C` | 复制当前鼠标选择（选择保留到下次点击，可重复复制） |
 | `Ctrl+X` | 复制最后一条 assistant 消息 |
+| `Alt+Shift+C` | 复制输入编辑器全部文本（paste 标记展开——与提交给 agent 的内容一致；空输入提示 `Input is empty`） |
 | `Ctrl+V` / `Alt+V` | 把系统剪贴板粘贴到光标处（归一化 + `[paste #N …]` 标记，同右键粘贴） |
 | 鼠标右键（聊天区） | 复制保留的鼠标选择（松开时触发，保持高亮） |
 | 鼠标右键（输入框） | 把系统剪贴板粘贴到光标处（编辑器归一化 + 大段 `[paste #N …]` 标记） |
@@ -219,7 +221,7 @@ btw 上下文保留主线的 system prompt 于 system 槽位，并逐字注入 f
 │   ├── clipboard-read.ts    # 平台剪贴板读取（win32 / darwin / linux + OSC 52 兜底）
 │   ├── retry.ts             # turn 级重试引擎：classifyRetryable + runWithRetry
 │   ├── model-switch.ts      # Ctrl+L fork 模型选择器：列表构建 + thinking 钳制
-│   ├── shortcuts.ts         # 快捷键绑定（Alt+W / Alt+T）
+│   ├── shortcuts.ts         # 快捷键绑定（Alt+W 后台 / Alt+T 模式 / Alt+Shift+C 复制输入）
 │   ├── side-chat-export.ts   # Alt+E 对话导出
 │   ├── tool-wrapper.ts       # 写路径重叠警告
 │   └── file-activity-tracker.ts

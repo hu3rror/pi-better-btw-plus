@@ -104,6 +104,22 @@ With no active mouse selection, Ctrl+C clears the input box — pi `app.clear`
 returns to clearing once the copied highlight is gone.
 _Avoid_: calling it "clear" — that's Alt+N (start an empty conversation).
 
+**Input editor**:
+The single text input the fork renders at the bottom of the overlay (a pi-tui
+`Editor` widget) — the side chat's draft surface, hit-tested via `isOverEditor`.
+Its text is what a submit sends (paste markers expanded); `getExpandedText()`
+is the canonical full-draft view.
+_Avoid_: "input box" (the widget is a TUI editor, and "box" blurs it with the
+overlay itself); bare "editor" when the surrounding code's editor is meant.
+
+**Copy input** (Alt+Shift+C):
+Copy the input editor's whole text — paste markers expanded, i.e. exactly what
+a submit would send — to the system clipboard. Read-only: unlike Clear input it
+never modifies the draft; an empty input flashes `Input is empty`. The
+counterpart of Clear input (Ctrl+C): one copies all, one clears all.
+_Avoid_: "select-all copy" — no selection is involved, and Ctrl+A stays the
+editor's line-start binding.
+
 **Overlay layout**:
 The arrangement of the overlay's on-screen regions (title bar, message area,
 input editor, hint bar). A single layout spec (`srcs/overlay-layout.ts` — the
