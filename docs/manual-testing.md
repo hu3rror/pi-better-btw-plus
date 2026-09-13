@@ -50,7 +50,7 @@ issue #1（spec）的验收清单。对应 SPEC.md「Testing Decisions → 手�
 6. `Ctrl+L` 模型选择器打开时 → `Alt+Shift+C` 不生效（模态接管键盘）
 7. 回归：`Ctrl+C`（无选中清空输入）、`Ctrl+X`（复制最后消息）不受影响
 
-> 依赖终端 kitty keyboard protocol（Windows Terminal ≥ 1.19 默认启用）：legacy ESC+C 序列无法被解析为 Alt+Shift+C。
+> 兼容无 kitty keyboard protocol 的终端（Windows Terminal < 1.25）：Alt+Shift+C 以 legacy ESC+C 送达，绑定显式接受该原始编码；WT ≥ 1.25 走 kitty CSI-u。
 ## C. Ctrl+L 模型切换
 
 1. `Ctrl+L` → 列表打开，只含 scoped（`--models` / `enabledModels`）或可用目录中**已配置认证**的模型

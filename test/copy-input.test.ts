@@ -77,4 +77,25 @@ describe("Alt+Shift+C copy input (issue #23)", () => {
     expect(M.render(80).some((l: string) => l.includes("11 chars"))).toBe(true);
     copiedTexts(); // consume the copy this test produced
   });
+
+  test("copies via the legacy ESC+C encoding (no kitty protocol)", async () => {
+    // Windows Terminal < 1.25 has no kitty keyboard protocol: Alt+Shift+C
+    // arrives as the legacy ESC + shifted-char form, which pi-tui's parser
+    // cannot express as alt+shift+c (parseKey returns undefined).
+    const overlay = makeOverlay();
+    overlay.handleInput("legacy draft");
+    overlay.handleInput("\x1bC");
+    await tick();
+    expect(copiedTexts()).toEqual(["legacy draft"]);
+  });
+
+  test("copies via the modifyOtherKeys encoding (mode-2 fallback)", async () => {
+    // pi-tui enables modifyOtherKeys mode 2 when kitty negotiation fails;
+    // terminals that honor it send Alt+Shift+C as ESC [ 27 ; 3 ; 99 ~.
+    const overlay = makeOverlay();
+    overlay.handleInput("mok draft");
+    overlay.handleInput("\x1b[27;3;99~");
+    await tick();
+    expect(copiedTexts()).toEqual(["mok draft"]);
+  });
 });

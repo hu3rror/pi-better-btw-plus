@@ -62,7 +62,7 @@ import {
   modelKey,
   type ModelChoice,
 } from "./model-switch.ts";
-import { KEYBINDINGS, matchesAnyKey } from "./shortcuts.ts";
+import { KEYBINDINGS, matchesAnyKey, matchesKeybinding } from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 import type { SideChatFeatures } from "./config.ts";
 import type { RetryPolicy } from "./retry.ts";
@@ -910,11 +910,13 @@ export class SideChatOverlay implements Component, Focusable {
       this.openModelPicker();
       return;
     }
-    if (matchesAnyKey(data, KEYBINDINGS.copyInput.keys)) {
+    if (matchesKeybinding(data, KEYBINDINGS.copyInput)) {
       // Copy the whole input editor text (issue #23): expanded paste
       // markers — exactly what a submit would send. Read-only, unlike
       // Ctrl+C's clear lane it never touches the draft; an empty input
-      // flashes a hint instead of copying.
+      // flashes a hint instead of copying. `matchesKeybinding` also accepts
+      // the raw legacy ESC+C form that terminals without the kitty protocol
+      // (Windows Terminal < 1.25) deliver for Alt+Shift+C.
       const text = this.editor.getExpandedText();
       if (!text) {
         this.status.flash(INPUT_EMPTY_STATUS, COPIED_STATUS_CLEAR_MS);

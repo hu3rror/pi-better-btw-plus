@@ -6,6 +6,17 @@ export const SIDE_CHAT_SHORTCUT: KeyId = "alt+w";
 interface Keybinding {
   readonly keys: readonly KeyId[];
   readonly hint: string;
+  /**
+   * Raw terminal encodings that also trigger this action, besides the
+   * parser-recognizable `keys`. Needed because pi-tui's parser cannot express
+   * alt+shift+letter: its legacy branch only maps ESC+lowercase to alt+letter,
+   * and its modifyOtherKeys parse drops the shift bit. Terminals without the
+   * kitty keyboard protocol (Windows Terminal < 1.25) deliver Alt+Shift+C as
+   * the legacy ESC+'C' form (shift folded into case), which parseKey returns
+   * undefined for — so the binding must match the raw bytes too. Only
+   * copyInput needs this today.
+   */
+  readonly raw?: readonly string[];
 }
 
 /**
@@ -37,7 +48,7 @@ export const KEYBINDINGS = {
   /** Copy the last side-chat assistant message (pi `app.message.copy` parity). */
   copyLastMessage: { keys: ["ctrl+x"], hint: "C+x last" },
   /** Copy all input editor text (expanded paste markers — submit semantics). */
-  copyInput: { keys: ["alt+shift+c"], hint: "A+⇧C all" },
+  copyInput: { keys: ["alt+shift+c"], raw: ["\x1bC", "\x1b[27;3;99~"], hint: "A+⇧C all" },
   /** Paste clipboard text (pi `app.clipboard.pasteImage` parity). */
   paste: { keys: ["ctrl+v", "alt+v"], hint: "C+v paste" },
 } as const satisfies Record<string, Keybinding>;
@@ -45,4 +56,10 @@ export const KEYBINDINGS = {
 /** True when `data` matches any of the keys. */
 export function matchesAnyKey(data: string, keys: readonly KeyId[]): boolean {
   return keys.some((key) => matchesKey(data, key));
+}
+
+/** True when `data` matches a binding's keys or one of its raw encodings. */
+export function matchesKeybinding(data: string, kb: Keybinding): boolean {
+  if (kb.raw?.includes(data)) return true;
+  return matchesAnyKey(data, kb.keys);
 }
