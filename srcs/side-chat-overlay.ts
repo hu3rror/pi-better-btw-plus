@@ -133,7 +133,7 @@ const PASTE_FAILED_STATUS = "Clipboard read failed";
 const PASTE_EMPTY_STATUS = "Clipboard is empty";
 const PASTE_STATUS_CLEAR_MS = 1200;
 /** Ctrl+X hint when the side chat has produced no assistant reply yet. */
-const NO_ASSISTANT_MESSAGE_STATUS = "No assistant message to copy in this turn";
+const NO_ASSISTANT_MESSAGE_STATUS = "No assistant message to copy yet";
 
 /**
  * Shared-prefix layout (#9, reverses decision #6): the main lane's system
@@ -308,7 +308,7 @@ export class SideChatOverlay implements Component, Focusable {
    * with a hint when the side chat has produced no reply yet.
    */
   async copyLastAssistantMessage(): Promise<void> {
-    const text = this.runner.getLastAssistantText({ onlyCurrentTurn: true });
+    const text = this.runner.getLastAssistantText({ sinceFork: true });
     if (!text) {
       this.status.flash(NO_ASSISTANT_MESSAGE_STATUS, COPIED_STATUS_CLEAR_MS);
       return;

@@ -13,7 +13,7 @@ pi-better-btw（侧聊 overlay 扩展）在 Windows Terminal 下有三个痛点�
 ## Solution
 
 - 侧聊 overlay 内部实现完整的右键语义（与 Windows Terminal 惯例一致），且粘贴体验与 pi 官方主编辑器对齐：聊天区有选区时右键 = 复制选区；输入框右键 = 从系统剪贴板粘贴文本到光标处，大段粘贴折叠为 `[paste #N +X lines]` 标记、提交时展开，与主会话行为一致。
-- 侧聊内新增模型选择器（Alt+M 键盘驱动），切换只作用于 fork 自身（fork-local），切换后继续当前对话。
+- 侧聊内新增模型选择器（Ctrl+L 键盘驱动，对齐 pi 官方 `app.model.select`），切换只作用于 fork 自身（fork-local），切换后继续当前对话。
 - 侧聊的 turn 循环接入与 pi 主会话一致的自动重试：读 `settings.retry` 预算，对可重试的瞬时 provider 错误指数退避自动重试，并在界面显示重试状态。
 
 ## User Stories
@@ -24,7 +24,7 @@ pi-better-btw（侧聊 overlay 扩展）在 Windows Terminal 下有三个痛点�
 4. 作为侧聊用户，我想右键粘贴多行/代码块时获得与主会话编辑器一致的体验——大段内容折叠为 `[paste #N +X lines]` 标记、提交时展开为完整文本，小段内容直接插入，换行/制表符按 pi 官方规则归一化（`\r`→`\n`、`\t`→4 空格），以便粘贴代码块不被破坏。
 5. 作为侧聊用户，我想剪贴板读取失败（平台通道与 OSC 52 回退均不可用）时粘贴静默降级并提示，以便不崩溃、不静默吞掉点击。
 6. 作为侧聊用户，我想在没有选区时右键聊天区不产生任何副作用，以便误触右键不会复制错误内容。
-7. 作为侧聊用户，我想按 Alt+M 打开模型选择列表，以便手动选择对话使用的模型。
+7. 作为侧聊用户，我想按 Ctrl+L 打开模型选择列表，以便手动选择对话使用的模型。
 8. 作为侧聊用户，我想模型列表只显示当前会话可用（scoped）且已配置认证的模型，以便不会选到必然失败的模型。
 9. 作为侧聊用户，我想切换到无 reasoning 能力的模型时 thinking level 自动钳制（`"off"` 映射为不请求 reasoning），以便不出现非法请求。
 10. 作为侧聊用户，我想切换模型后继续原对话上下文，以便不用重开侧聊。
@@ -48,10 +48,10 @@ pi-better-btw（侧聊 overlay 扩展）在 Windows Terminal 下有三个痛点�
 - **D4（编辑器粘贴）**：粘贴**走 pi-tui Editor 内置的粘贴入口**，不手写归一化：Editor 自带大段折叠（>10 行或 >1000 字符 → `[paste #N +X lines]` / `[paste #N X chars]` 标记，提交时展开）、`normalizeText`（`\r`→`\n`、`\t`→4 空格）、原子 undo 快照与 onChange。submit 路径必须用展开后的文本（`getExpandedText` 语义）发给 agent，避免把标记原文发给模型。
 - **D5（模型切换机制，已验证）**：保持 fork 自己的 transcript 不变，运行时替换 agent 的当前模型——`agent.state.model` 与 `agent.state.thinkingLevel` 均在每次 turn 构建配置快照时重读（pi-agent-core 已核实），无需重建 agent。切换后按新模型能力钳制 thinking level（`"off"` 映射为 `reasoning: undefined`），照抄主会话 `setThinkingLevel` 的 clamp 语义。主会话的模型接口不动——侧聊模型选择只影响 fork 自身（ADR 0002）。
 - **D6（模型列表来源）**：优先使用会话作用域模型集（scoped models），为空（未配置 scoping）时回退到可用模型目录；**过滤**掉未配置认证的模型（"只显示"，而非置灰）。
-- **D7（模型选择 UI）**：选择器渲染在 overlay 内部（模态列表模式），不用宿主的选择对话框——宿主在 overlay 已打开时拒绝第二个 overlay。Alt+M 打开，上下选择、回车确认、Esc 取消，复用现有列表主题。**流式期间拒绝打开**。选择为 overlay 实例级状态：Alt+W 背景化保留；refork（Alt+R）/ clear（Alt+N）/ Esc-close 后随实例销毁重置回主会话模型。
+- **D7（模型选择 UI）**：选择器渲染在 overlay 内部（模态列表模式），不用宿主的选择对话框——宿主在 overlay 已打开时拒绝第二个 overlay。Ctrl+L 打开（pi `app.model.select` 同键），上下选择、回车确认、Esc 取消，复用现有列表主题。**流式期间拒绝打开**。选择为 overlay 实例级状态：Alt+W 背景化保留；refork（Alt+R）/ clear（Alt+N）/ Esc-close 后随实例销毁重置回主会话模型。
 - **D8（retry 预算读取）**：扩展已从同一 agent 配置目录读取分层用户配置；新增从共享 settings 文件读 `retry` 块（`enabled` / `maxRetries` / `baseDelayMs`），默认值与 pi 一致（enabled=true, maxRetries=3, baseDelayMs=2000）。
 - **D9（重试循环）**：turn 提交处包一层**注入式重试循环**（新 seam，拆在循环最高点）：错误分类器照抄 pi 的 `_isRetryableError` 语义（overloaded / rate limit / 5xx 可重试，缺失 status 按 pi 实际匹配，abort 与上下文溢出排除），不发明私有协议；按 `baseDelayMs * 2^(n-1)` 退避，期间显示 "Retrying (attempt n)…" 倒计时并可被 Esc 取消——**取消 = 立即展示最后一次错误作为最终结果**（与预算耗尽同构）；预算耗尽后展示最终错误。重试前对失败 assistant 消息的清理照抄主会话的 `_findLastAssistantMessage`/`_replaceMessageInPlace` 语义（不把错误消息重复送入下一次请求）。
-- **D10（UI 呈现）**：头部状态区显示当前模型；提示栏新增绑定提示（Alt+M 选模型、右键复制/粘贴说明）；重试退避倒计时显示在状态区。
+- **D10（UI 呈现）**：头部状态区显示当前模型；提示栏新增绑定提示（Ctrl+L 选模型、右键复制/粘贴说明）；重试退避倒计时显示在状态区。
 - **D11（可配置性）**：右键复制/粘贴、模型切换、retry 均可通过扩展分层配置开关（bundle/user/project）控制，默认开启，避免破坏既有用户行为；行为变更写入文档。
 - **D12（交付形态）**：自维护 fork，不做上游 PR（扩展自行管理）。仓库已接线：origin=`hu3rror/pi-better-btw-plus`，本 spec 同步于 issue #1（`ready-for-agent`），五个 triage 标签就位。
 - **D13（测试基线债）**：修复既有 4 个失败用例（Windows 上 `copyToClipboard` 走 native clipboard、OSC 52 stdout 捕获断言失效）——用 mock 替换剪贴板写侧而非按平台 skip。探针已验证可行，模式为 bun `mock.module` 局部覆盖（prototype 产物，编码了精确决策）：
@@ -72,10 +72,10 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
   - **剪贴板读取 helper**（平台通道注入）——单测：mock 平台通道失败 → 回退 → 返回 null；成功路径返回文本（prior art：`config.test.ts` 的临时目录树注入模式）。
   - **模型模块**（`buildModelChoices(scoped, available, hasAuth)` 列表构建 + 认证过滤；`clampThinkingLevel(model, current)` 按新模型能力钳制，含 `"off"`）——纯函数单测（prior art：`side-chat-mouse.ts` 的 SGR 分类器测试）。
   - **retry 模块**（`classifyRetryable(error)` 分类表照抄 pi；`runWithRetry({ attempt, classify, delay, signal, onAttempt })` 循环，attempt 注入 + 假时钟）——单测：连续失败 N 次、退避序列、预算耗尽、Esc 取消竞态（prior art：纯分类器测试）。
-  - **overlay 集成层**（直接驱动 `handleMouseEvent`/`handleInput`，prior art：`select.test.ts` 的 overlay 套件）——右键命中三类结果（有选区复制 / 输入区粘贴 / 其它忽略、无选区无副作用）、复制后选区保留、Alt+M 选择后 `agent.state.model` 更新 + thinking 钳制、流式拒绝打开、粘贴后编辑器文本含粘贴内容（大段为标记）。
+  - **overlay 集成层**（直接驱动 `handleMouseEvent`/`handleInput`，prior art：`select.test.ts` 的 overlay 套件）——右键命中三类结果（有选区复制 / 输入区粘贴 / 其它忽略、无选区无副作用）、复制后选区保留、Ctrl+L 选择后 `agent.state.model` 更新 + thinking 钳制、流式拒绝打开、粘贴后编辑器文本含粘贴内容（大段为标记）。
   - **配置解析新增字段**——并入现有 `config.test.ts`（prior art：分层解析测试），三开关默认值 + 分层覆盖。
 - **测试基线债**：4 个失败用例按 D13 的 mock 模式修复，OSC 52 stdout 捕获作废。
-- **手动验证（Windows Terminal + 本机 pi 0.85.1）**：侧聊内拖选→右键复制→系统剪贴板内容正确且选区保留；输入框右键粘贴多行/大段内容出现 `[paste #N +X lines]` 标记、提交后 agent 收到完整文本；右键点击无选区聊天区/头部无副作用；Alt+M 列表选择/取消、流式期间打不开；切换无 reasoning 模型后 thinking 被钳制；对本地不可达端点触发瞬时错误观察自动重试、倒计时与 Esc 取消；Alt+W 背景化后主界面原生选择恢复、恢复后模型选择保留。
+- **手动验证（Windows Terminal + 本机 pi 0.85.1）**：侧聊内拖选→右键复制→系统剪贴板内容正确且选区保留；输入框右键粘贴多行/大段内容出现 `[paste #N +X lines]` 标记、提交后 agent 收到完整文本；右键点击无选区聊天区/头部无副作用；Ctrl+L 列表选择/取消、流式期间打不开；切换无 reasoning 模型后 thinking 被钳制；对本地不可达端点触发瞬时错误观察自动重试、倒计时与 Esc 取消；Alt+W 背景化后主界面原生选择恢复、恢复后模型选择保留。
 
 ## Out of Scope
 
@@ -217,7 +217,7 @@ fork 的 turn 装配补上与 pi 主会话一致的 **provider 层重试**：读
 - **D1（复用机制 = 注入，非移植非显式调用）**：新增一个纯装配 helper，对 fork 的流式函数做 options 注入：`{ ...options, timeoutMs, maxRetries, maxRetryDelayMs }`（缺省键回退 `options?.X ?? settings.X`）。重试循环并不由该 helper 实现——`streamSimple` 内部已用 pi 的 `retryProviderRequest` 包住 SDK 调用并消费 `options.maxRetries` / `options.maxRetryDelayMs`（0.85.1 运行时与 0.84.2 devDeps 均已核实），因此注入即是复用 pi 的 util。不 deep import `@earendil-works/pi-ai/dist/utils/provider-retry.js`（非公开导出，版本脆弱），不本地移植退避算法。装配位置即今日 `streamFn` 直连 `streamSimple` 之处（overlay 组装 agent options 处）。
 - **D2（注入键范围）**：`timeoutMs` + `maxRetries` + `maxRetryDelayMs` 三键全部注入（镜像 pi-coding-agent `sdk.js` 的 streamFn 注入链）。`httpIdleTimeoutMs`（另一 settings 键）不纳入。
 - **D3（零开销恒等）**：`provider` 块缺失/无可注入键时，helper 原样返回原流式函数（恒等），未配置行为与现状字节级一致。
-- **D4（配置管道）**：`RetryPolicy` 增加可选 `provider?: { timeoutMs?; maxRetries?; maxRetryDelayMs? }` 块，`loadRetryPolicy` 在既有 global+project `settings.retry` 合并结果上提取（缺失键落空，与 pi `getProviderRetrySettings` 同源同语义）。加载侧不默认 `maxRetryDelayMs`——pi-ai 内部对缺省值有 60000 兜底，行为一致。turn 层循环（`runWithRetry`）只读 `enabled/maxRetries/baseDelayMs`，`provider` 块仅由 overlay 的流式装配消费。
+- **D4（配置管道）**：`RetryPolicy` 增加可选 `provider?: { timeoutMs?; maxRetries?; maxRetryDelayMs? }` 块。`loadRetryPolicy` 改用 pi 的 `SettingsManager`（global+project 合并、`retry.maxDelayMs` → `retry.provider.maxRetryDelayMs` 迁移、默认值均来自 pi，不再自研）：turn 层三键取 `getRetrySettings()`；provider 块在任一 scope 实际配置了 `retry.provider` 时经 `getProviderRetrySettings()` 转发（只保留数字键，`maxRetryDelayMs` 未配置时由 pi 补足 60000 默认），未配置时 `provider` 保持 `undefined`，守住 D3 恒等契约。turn 层循环（`runWithRetry`）只读 `enabled/maxRetries/baseDelayMs`；`provider` 块仅由 overlay 的流式装配消费。
 - **D5（门控）**：provider 层重试不与 `features.retry`、`settings.retry.enabled` 门控——逐行镜像 pi 主会话（其 provider 层不读这两个开关）。D11 开关继续只管扩展自研的 turn 层循环。
 - **D6（分类器一行不动）**：`retry.ts` 分类表与 `isRetryableAssistantError` 镜像保持。已核实 pi 自身对该报文同样判不可重试（两表字节一致），因此 provider 层是行为对齐边界，不在分类层引入偏离。
 - **D7（时序）**：provider 层（HTTP 请求层，assistant message 之前）→ 耗尽后进入 turn 层（分类 assistant error message）→ 耗尽后展示最终错误。两层串行，与主会话一致。

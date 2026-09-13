@@ -320,7 +320,7 @@ describe("side-chat-overlay.ts", () => {
     const M: any = (overlay as any).messages;
     expect(
       M.render(80).some((l: string) =>
-        l.includes("No assistant message to copy in this turn"),
+        l.includes("No assistant message to copy yet"),
       ),
     ).toBe(true);
   });

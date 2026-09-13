@@ -85,10 +85,10 @@ export class ForkTurnRunner {
   /** The owned fork agent; the overlay reaches it for model picker / export / Alt+T. */
   readonly agent: Agent;
 
-  /** Transcript length at construction (forked context + framing block). The
-   * `onlyCurrentTurn` boundary in getLastAssistantText: messages at or after
-   * this index are the side chat's own turns. */
-  private readonly initialMessageCount: number;
+  /** Fork boundary index: transcript length at construction (forked context +
+   * framing block). Messages at or after it are the side chat's own; before
+   * it is the inherited forked context (CONTEXT.md: Fork boundary). */
+  private readonly forkBoundaryIndex: number;
 
   /** Out-of-lane attempts in the current turn (reset at the top of run()). */
   private laneViolations = 0;
@@ -110,7 +110,7 @@ export class ForkTurnRunner {
       beforeToolCall: (context) => this.beforeToolCall(context),
       afterToolCall: (context) => this.afterToolCall(context),
     });
-    this.initialMessageCount = this.agent.state.messages.length;
+    this.forkBoundaryIndex = this.agent.state.messages.length;
     this.agent.subscribe((event) => this.handleAgentEvent(event));
   }
 
@@ -185,14 +185,14 @@ export class ForkTurnRunner {
 
   /**
    * The text of the last assistant message (text blocks joined, or its
-   * errorMessage for an error stop). `onlyCurrentTurn` restricts the search to
-   * messages the side chat produced itself (index ≥ the fork's initial
-   * transcript) — never the forked main-lane context. Undefined when no such
-   * assistant message has text.
+   * errorMessage for an error stop). `sinceFork` restricts the search to the
+   * side chat's own messages (at or after the fork boundary) — never the
+   * inherited forked context. Undefined when no such assistant message has
+   * text.
    */
-  getLastAssistantText(options: { onlyCurrentTurn?: boolean } = {}): string | undefined {
+  getLastAssistantText(options: { sinceFork?: boolean } = {}): string | undefined {
     const messages = this.agent.state.messages;
-    const start = options.onlyCurrentTurn ? this.initialMessageCount : 0;
+    const start = options.sinceFork ? this.forkBoundaryIndex : 0;
     for (let i = messages.length - 1; i >= start; i--) {
       const msg = messages[i];
       if (msg.role !== "assistant") continue;

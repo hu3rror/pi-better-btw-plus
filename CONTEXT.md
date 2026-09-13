@@ -13,6 +13,18 @@ session's current messages, model, and system prompt. It keeps its own message
 history and its own model selection.
 _Avoid_: calling the fork a "window" (that's the overlay); calling it a "branch"
 
+**Forked context**:
+The main-lane messages the fork inherits at creation — the prefix of the fork's
+transcript before the fork boundary. Copy and export semantics never reach back
+into it; only the side chat's own messages (at or after the boundary) do.
+_Avoid_: "the fork history" (that would blur it with the messages the side chat produces itself)
+
+**Fork boundary**:
+The line in the fork's transcript where the inherited forked context ends and the
+side chat's own messages begin. The `since_fork` anchor and last-message copy
+both key off this line; refork/clear draw a fresh boundary with the new fork.
+_Avoid_: "current turn" — a turn is one submit→response; this line crosses turns.
+
 **Refork** (Alt+R):
 Discard the fork's message history and re-derive it from the main session's current
 context. Distinct from clearing (Alt+N), which starts an empty fork.
@@ -29,6 +41,8 @@ the terminal's native selection behavior.
 **Turn**:
 One user submit through to the agent's finished response. The unit the retry loop
 wraps, and the unit out-of-lane escalation can abort.
+_Avoid_: using "turn" for the whole side-chat conversation since the fork — that span
+crosses many turns and is the fork boundary, not a turn.
 
 **Attempt** (尝试):
 One agent run (prompt or continue) inside a turn. The unit the retry loop
