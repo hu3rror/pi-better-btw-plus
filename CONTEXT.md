@@ -94,7 +94,15 @@ scroll, right-click copy and paste. The umbrella term over mouse selection.
 **Mouse selection**:
 The drag-selection gesture: left-drag anchors a range, double-click selects a
 line. One pointer gesture; the selection it leaves is the single source for
-hotkey copy (Ctrl+C / Ctrl+Shift+C) and right-click copy.
+hotkey copy (Ctrl+C / Ctrl+Shift+C) and right-click copy; a successful copy
+consumes it (spec #22), so Ctrl+C returns to clearing the input once the
+highlight is gone.
+
+**Clear input** (Ctrl+C, 无选中):
+With no active mouse selection, Ctrl+C clears the input box — pi `app.clear`
+(`clearEditor`) parity. Copying consumes the selection (spec #22), so Ctrl+C
+returns to clearing once the copied highlight is gone.
+_Avoid_: calling it "clear" — that's Alt+N (start an empty conversation).
 
 **Overlay layout**:
 The arrangement of the overlay's on-screen regions (title bar, message area,

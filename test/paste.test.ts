@@ -203,7 +203,10 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     await tick();
     expect((overlay as any).editor.getText()).toBe("pasted");
     expect(copiedTexts().length).toBe(0);
-    // A second chat right-click copies again — the paste didn't disturb it.
+    // A fresh selection + right-click copies again: the paste didn't disturb
+    // the copy branch — the previous copy consumed its selection (spec #22),
+    // so the user reselects before copying.
+    M.setSelection({ line: 0, col: 7 }, { line: 0, col: 12 });
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: false });
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: true });
     await tick();

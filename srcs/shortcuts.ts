@@ -28,7 +28,12 @@ export const KEYBINDINGS = {
   /** Read-only / edit mode toggle (Ctrl+T freed for pi's thinking toggle). */
   toggleMode: { keys: ["alt+t"], hint: "A+t" },
   /** Copy the active mouse selection (pi `tui.input.copy` parity). */
-  copySelection: { keys: ["ctrl+c", "ctrl+shift+c"], hint: "C+c copy" },
+  /**
+   * Copy the active mouse selection (pi `tui.input.copy` parity). Without
+   * one, bare Ctrl+C clears the input box (pi `app.clear` parity, spec #22);
+   * Ctrl+Shift+C stays a forced copy.
+   */
+  copySelection: { keys: ["ctrl+c", "ctrl+shift+c"], hint: "C+c copy/clear" },
   /** Copy the last side-chat assistant message (pi `app.message.copy` parity). */
   copyLastMessage: { keys: ["ctrl+x"], hint: "C+x last" },
   /** Paste clipboard text (pi `app.clipboard.pasteImage` parity). */

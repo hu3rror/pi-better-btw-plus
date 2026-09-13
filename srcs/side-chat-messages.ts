@@ -57,8 +57,9 @@ export class SideChatMessages implements Component {
   private totalLines = 0;
   /**
    * Active mouse selection over the visible chat lines ({@link CellPos} in
-   * rendered-line coordinates). Cleared on scroll / content changes and on
-   * the next press; kept after copy so Ctrl+C can copy again (B+C scheme).
+   * rendered-line coordinates). Cleared on scroll / content changes, on the
+   * next press, and after a successful copy (spec #22: Ctrl+C with no
+   * selection clears the input instead of re-copying).
    */
   private selection: { anchor: CellPos; focus: CellPos } | null = null;
   /** Plain (ANSI-stripped) text of the last rendered lines, for hit-testing and copy. */

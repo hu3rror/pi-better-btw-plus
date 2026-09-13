@@ -185,24 +185,62 @@ describe("side-chat-overlay.ts", () => {
     expect(g.msgHeight).toBeLessThanOrEqual(10);
   });
 
-  test("ctrl+c copies the retained selection; no selection falls through", async () => {
+  test("ctrl+c without a selection clears the input (pi app.clear parity)", async () => {
     const overlay = makeOverlay();
+    overlay.handleInput("draft text");
+    const editor: any = (overlay as any).editor;
+    expect(editor.getText()).toBe("draft text");
+    overlay.handleInput("\x03"); // raw Ctrl+C terminal byte
+    await tick();
+    expect(editor.getText()).toBe("");
+    expect(copiedTexts().length).toBe(0);
+  });
+
+  test("copying clears the selection so the next ctrl+c clears the input", async () => {
+    const overlay = makeOverlay();
+    // Drag-select "hello" on the first user line, then hotkey-copy it.
     overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    await tick();
+    overlay.handleInput("\x03");
+    await tick();
+    expect(copiedTexts()[0]).toBe("hello");
+    // The copy consumes the selection: the highlight is gone, so the next
+    // ctrl+c falls into the clear-input lane instead of re-copying.
+    expect((overlay as any).messages.hasSelection()).toBe(false);
+  });
+
+  test("ctrl+c / ctrl+shift+c copy the active selection while one is active", async () => {
+    const overlay = makeOverlay();
+    const selectHello = () => {
+      overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
+      overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
+      overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    };
+    selectHello();
     await tick();
     expect(copiedTexts().length).toBe(0); // nothing copied at release
     overlay.handleInput("\x03"); // raw Ctrl+C terminal byte
     await tick();
     expect(copiedTexts()[0]).toBe("hello");
-    // ctrl+shift+c via kitty CSI-u (mod = shift|ctrl + 1 = 6) re-copies
+    // The copy consumed the selection; reselect and copy via ctrl+shift+c
+    // (kitty CSI-u, mod = shift|ctrl + 1 = 6).
+    selectHello();
+    await tick();
     overlay.handleInput("\x1b[99;6u");
     await tick();
-    expect(copiedTexts().length).toBe(1);
-    // without a selection, ctrl+c must not copy (falls through to the editor)
-    (overlay as any).messages.clearSelection();
-    overlay.handleInput("\x03");
+    expect(copiedTexts()).toEqual(["hello"]);
+  });
+
+  test("ctrl+shift+c without a selection stays inert (forced-copy habit)", async () => {
+    const overlay = makeOverlay();
+    overlay.handleInput("draft text");
+    overlay.handleInput("\x1b[99;6u"); // ctrl+shift+c via kitty CSI-u
     await tick();
+    // Neither cleared the input nor copied: only bare Ctrl+C gets the
+    // clear-input lane (pi binds no ctrl+shift+c).
+    expect((overlay as any).editor.getText()).toBe("draft text");
     expect(copiedTexts().length).toBe(0);
   });
 
@@ -218,7 +256,7 @@ describe("side-chat-overlay.ts", () => {
     copiedTexts(); // consume the copy this test produced
   });
 
-  test("copy failure surfaces an error status", async () => {
+  test("copy failure surfaces an error status and keeps the selection", async () => {
     const overlay = makeOverlay();
     const M: any = (overlay as any).messages;
     M.setSelection({ line: 0, col: 0 }, { line: 0, col: 3 });
@@ -232,7 +270,23 @@ describe("side-chat-overlay.ts", () => {
     expect(M.render(80).some((l: string) => l.includes("Copy failed"))).toBe(
       true,
     );
+    // A failed copy keeps the highlight so the user can retry.
+    expect(M.hasSelection()).toBe(true);
   });
+  test("right-click copy also consumes the selection", async () => {
+    const overlay = makeOverlay();
+    // Drag-select "hello", then right-click over the chat area to copy.
+    overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
+    await tick();
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: false });
+    overlay.handleMouseEvent({ button: 2, col: 20, row: 5, isRelease: true });
+    await tick();
+    expect(copiedTexts()[0]).toBe("hello");
+    expect((overlay as any).messages.hasSelection()).toBe(false);
+  });
+
 
   test("the copy flash survives spinner ticks during the thinking gap (spec #19 wart)", async () => {
     // Fake agent whose prompt stalls until released: the submit starts a turn

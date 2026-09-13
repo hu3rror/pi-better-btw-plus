@@ -269,14 +269,20 @@ export class SideChatOverlay implements Component, Focusable {
    * Copy the current mouse selection to the clipboard (native → wl-copy /
    * xclip → OSC 52 cascade via {@link copyToClipboard}, matching the main
    * app's tree selector) and show a transient status. Copying is hotkey-only:
-   * `Ctrl+C` / `Ctrl+Shift+C` with an active mouse selection. The selection
-   * stays highlighted so a second copy key press re-copies. Returns false when
-   * there is nothing to copy.
+   * `Ctrl+C` / `Ctrl+Shift+C` with an active mouse selection. A successful
+   * copy consumes the selection (spec #22: Ctrl+C then returns to clearing
+   * the input); a failed copy keeps it so the user can retry. Returns false
+   * when there is nothing to copy.
    */
   async copySelectionToClipboard(): Promise<boolean> {
     const text = this.messages.getSelectedText();
     if (!text) return false;
-    return this.copyTextWithFeedback(text);
+    const ok = await this.copyTextWithFeedback(text);
+    if (ok) {
+      this.messages.clearSelection();
+      this.options.tui.requestRender();
+    }
+    return ok;
   }
 
   /**
@@ -904,10 +910,16 @@ export class SideChatOverlay implements Component, Focusable {
     }
     if (matchesAnyKey(data, KEYBINDINGS.copySelection.keys)) {
       // Hotkey copy: with an active mouse selection, Ctrl+C / Ctrl+Shift+C
-      // copies it. Without one, fall through so Ctrl+C keeps the editor's
-      // own semantics.
+      // copies it. Without one, Ctrl+C clears the input box (pi `app.clear`
+      // parity, spec #22); Ctrl+Shift+C falls through — pi binds no such
+      // key, so it stays a forced copy (terminal habit).
       if (this.messages.hasSelection()) {
         void this.copySelectionToClipboard();
+        return;
+      }
+      if (matchesKey(data, KEYBINDINGS.copySelection.keys[0])) {
+        this.editor.setText("");
+        this.options.tui.requestRender();
         return;
       }
     }

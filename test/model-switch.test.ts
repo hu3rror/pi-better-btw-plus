@@ -319,6 +319,18 @@ describe("side-chat-overlay model picker", () => {
     expect(agentState(overlay).thinkingLevel).toBe("medium");
   });
 
+  test("Ctrl+C cancels the picker without clearing the input (spec #22)", () => {
+    const overlay = makeOverlay({
+      modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
+    });
+    overlay.handleInput("draft");
+    overlay.handleInput(CTRL_L);
+    expect(picker(overlay)).not.toBeNull();
+    overlay.handleInput("\x03"); // Ctrl+C routes to the modal, not clear-input
+    expect(picker(overlay)).toBeNull();
+    expect((overlay as any).editor.getText()).toBe("draft");
+  });
+
   test("opening is rejected while streaming", () => {
     const overlay = makeOverlay({
       modelRegistry: makeRegistry(available, ["model-a", "model-b"]),
