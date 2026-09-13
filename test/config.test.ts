@@ -458,27 +458,18 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
   });
 
   test("missing cwd falls back to process.cwd() for the project layer", () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-better-btw-retry-cwd-"));
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "cwd");
-    mkdirSync(agentDir, { recursive: true });
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(
-      join(agentDir, "settings.json"),
-      JSON.stringify({ retry: { maxRetries: 8 } }),
-    );
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ retry: { maxRetries: 2 } }),
-    );
+    const tree = makeRetryTree({
+      global: { retry: { maxRetries: 8 } },
+      project: { retry: { maxRetries: 2 } },
+    });
     const originalCwd = process.cwd();
     try {
-      process.chdir(cwd);
+      process.chdir(tree.cwd);
       // No cwd option → the project layer must be read from process.cwd().
-      expect(loadRetryPolicy({ agentConfigDir: agentDir }).maxRetries).toBe(2);
+      expect(loadRetryPolicy({ agentConfigDir: tree.agentDir }).maxRetries).toBe(2);
     } finally {
       process.chdir(originalCwd);
-      rmSync(root, { recursive: true, force: true });
+      tree.cleanup();
     }
   });
 
