@@ -45,6 +45,13 @@ import {
 import { exportChatHistoryToFile } from "./side-chat-export.ts";
 import { type SgrMouseEvent } from "./side-chat-mouse.ts";
 import {
+  contentBandPlainLines,
+  EditorSelectionState,
+  lineSelection,
+  wordSelection,
+  type EditorPos,
+} from "./editor-selection.ts";
+import {
   PointerGesture,
   type GestureAction,
 } from "./pointer-gesture.ts";
@@ -171,6 +178,10 @@ export class SideChatOverlay implements Component, Focusable {
   private geometry: ChatGeometry | null = null;
   /** Pointer gesture state machine (spec #13): press/drag/double-click/right-click classification. */
   private gesture: PointerGesture;
+  /** Visual-space selection over the input editor (spec #24, T3). */
+  private editorSelection = new EditorSelectionState();
+  /** Plain (ANSI-stripped) lines of the last editor render's content band. */
+  private editorPlainLines: string[] = [];
   /** Leading messages injected from the main lane at fork time (context cite). */
   private forkedMessageCount: number;
   /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
@@ -217,6 +228,7 @@ export class SideChatOverlay implements Component, Focusable {
   cancelMouseDrag(): void {
     this.gesture.cancel();
     this.messages.clearSelection();
+    this.editorSelection.clear();
   }
 
   /**
@@ -243,16 +255,36 @@ export class SideChatOverlay implements Component, Focusable {
   private applyGestureAction(action: GestureAction): void {
     switch (action.kind) {
       case "select":
-        this.messages.setSelection(action.anchor, action.focus);
+        // Cross-surface exclusion (spec #24): starting a selection on one
+        // surface clears the other, so only one highlight is ever on screen.
+        if (action.surface === "editor") {
+          this.setEditorSelection(action.anchor, action.focus);
+        } else {
+          this.setChatSelection(action.anchor, action.focus);
+        }
         if (action.paint) this.options.tui.requestRender();
         break;
       case "selectLine":
-        // Column bounds come from the overlay's own geometry; the module
-        // only knows the rendered line.
-        this.messages.setSelection(
-          { line: action.line, col: 0 },
-          { line: action.line, col: this.geometry?.innerWidth ?? 0 },
-        );
+        if (action.surface === "editor") {
+          // Column bounds come from the editor's own content band; the module
+          // only knows the rendered line (spec #24/#26).
+          const sel = lineSelection(this.editorPlainLines, action.line);
+          this.setEditorSelection(sel.anchor, sel.focus);
+        } else {
+          // Column bounds come from the overlay's own geometry; the module
+          // only knows the rendered line.
+          this.setChatSelection(
+            { line: action.line, col: 0 },
+            { line: action.line, col: this.geometry?.innerWidth ?? 0 },
+          );
+        }
+        this.options.tui.requestRender();
+        break;
+      case "selectWord":
+        // Editor double-click: word bounds resolved by the overlay from the
+        // editor's own content band (findWordBackward/Forward semantics).
+        const word = wordSelection(this.editorPlainLines, action.line, action.col);
+        this.setEditorSelection(word.anchor, word.focus);
         this.options.tui.requestRender();
         break;
       case "scroll":
@@ -265,6 +297,18 @@ export class SideChatOverlay implements Component, Focusable {
         void this.pasteFromClipboard();
         break;
     }
+  }
+
+  /** Set the chat selection, clearing the editor selection (cross-surface). */
+  private setChatSelection(anchor: CellPos, focus: CellPos): void {
+    this.messages.setSelection(anchor, focus);
+    this.editorSelection.clear();
+  }
+
+  /** Set the editor selection, clearing the chat selection (cross-surface). */
+  private setEditorSelection(anchor: EditorPos, focus: EditorPos): void {
+    this.editorSelection.setSelection(anchor, focus);
+    this.messages.clearSelection();
   }
 
   /**
@@ -282,6 +326,23 @@ export class SideChatOverlay implements Component, Focusable {
     const ok = await this.copyTextWithFeedback(text);
     if (ok) {
       this.messages.clearSelection();
+      this.options.tui.requestRender();
+    }
+    return ok;
+  }
+
+  /**
+   * Copy the current editor selection (spec #24, hotkey-only): selected text
+   * from the editor content band, consumed on success so Ctrl+C then falls
+   * back to the clear-input lane; a failed (or empty) copy keeps it for retry.
+   */
+  async copyEditorSelectionToClipboard(): Promise<boolean> {
+    if (!this.editorSelection.hasSelection()) return false;
+    const text = this.editorSelection.selectedText(this.editorPlainLines);
+    if (!text) return false;
+    const ok = await this.copyTextWithFeedback(text);
+    if (ok) {
+      this.editorSelection.clear();
       this.options.tui.requestRender();
     }
     return ok;
@@ -348,6 +409,7 @@ export class SideChatOverlay implements Component, Focusable {
     }
     // Bracketed paste is the only paste entry the Editor exposes (handlePaste
     // is private); the same sequences a native terminal paste produces.
+    this.editorSelection.clear();
     this.editor.handleInput(`\x1b[200~${outcome.text}\x1b[201~`);
     this.options.tui.requestRender();
   }
@@ -377,6 +439,32 @@ export class SideChatOverlay implements Component, Focusable {
     if (!g) return { line: 0, col: 0 };
     const line = Math.max(0, Math.min(row - g.msgTopRow, g.msgHeight - 1));
     const c = Math.max(0, Math.min(col - g.contentCol, g.innerWidth - 1));
+    return { line, col: c };
+  }
+
+  /**
+   * Map 0-based screen coords to an editor visual cell, or null off the
+   * editor content band (the `Editor.render()` lines between the top and
+   * bottom borders). The top border row is `editorTopRow`, so content-band
+   * line 0 is the next screen row down.
+   */
+  private screenToEditor(row: number, col: number): EditorPos | null {
+    const g = this.geometry;
+    if (!g) return null;
+    const line = row - (g.editorTopRow + 1);
+    const c = col - g.contentCol;
+    if (line < 0 || line >= g.editorHeight - 2 || c < 0 || c >= g.innerWidth)
+      return null;
+    return { line, col: c };
+  }
+
+  /** Like {@link screenToEditor} but clamps into the editor content band (drag overshoot). */
+  private clampScreenToEditor(row: number, col: number): EditorPos {
+    const g = this.geometry;
+    if (!g) return { line: 0, col: 0 };
+    const maxLine = Math.max(0, g.editorHeight - 3);
+    const line = Math.max(0, Math.min(row - (g.editorTopRow + 1), maxLine));
+    const c = Math.max(0, Math.min(col - g.contentCol, Math.max(0, g.innerWidth - 1)));
     return { line, col: c };
   }
 
@@ -464,19 +552,25 @@ export class SideChatOverlay implements Component, Focusable {
         chatAt: (row, col) => this.screenToChat(row, col),
         clampToChat: (row, col) => this.clampScreenToChat(row, col),
         overEditor: (row, _col) => this.isOverEditor(row),
-        // Editor surface (spec #24): the real hit-testing / selection store
-        // lands in T3 (#27). Until then these classify every editor press as
-        // off-surface, preserving the pre-editor-selection behavior (a left
-        // press on the input editor starts no drag; right-click still pastes).
-        editorAt: (_row, _col) => null,
-        clampToEditor: (_row, _col) => ({ line: 0, col: 0 }),
-        hasEditorSelection: () => false,
-        getEditorSelectionAnchor: () => null,
+        // Editor surface (spec #24/#26): real hit-testing / selection store.
+        // While the autocomplete popup is open the editor-drag branch is
+        // disabled (row-index drift — ADR 0006), so editorAt reports null and
+        // left presses fall through to a no-op.
+        editorAt: (row, col) =>
+          this.editor.isShowingAutocomplete()
+            ? null
+            : this.screenToEditor(row, col),
+        clampToEditor: (row, col) => this.clampScreenToEditor(row, col),
+        hasEditorSelection: () => this.editorSelection.hasSelection(),
+        getEditorSelectionAnchor: () => this.editorSelection.getAnchor(),
         hasSelection: () => this.messages.hasSelection(),
         getSelectionAnchor: () => this.messages.getSelectionAnchor(),
       },
       // D11: the feature switch gates right-click copy/paste at the module.
       rightClickEnabled: this.options.features.rightClickCopyPaste,
+      // Editor-selection gate (spec #24): off → left-drag never classifies
+      // onto the editor surface; right-click paste is unaffected.
+      editorSelectionEnabled: this.options.features.editorSelection,
     });
 
     // The runner (fork-turn.ts, issue #9) owns the fork agent and the whole
@@ -686,6 +780,7 @@ export class SideChatOverlay implements Component, Focusable {
     this.refreshFramingModel();
 
     this.editor.setText("");
+    this.editorSelection.clear();
     this.streamingContent = "";
     // A new user message resumes bottom-following even if the view was frozen.
     this.messages.resumeFollowing();
@@ -856,6 +951,13 @@ export class SideChatOverlay implements Component, Focusable {
     for (let i = msgLines.length; i < maxLines; i++) msgLines.push("");
 
     const editorLines = this.editor.render(innerWidth);
+    // Editor selection (spec #24): hit-testing / copy resolve against the
+    // content band (top/bottom borders dropped, ANSI stripped), and the
+    // highlight is injected by post-processing the rendered lines. The plain
+    // lines are cached here so mouse actions between renders see the same
+    // band the frame was drawn from.
+    this.editorPlainLines = contentBandPlainLines(editorLines);
+    const decoratedEditorLines = this.editorSelection.decorate(editorLines);
     const lines = renderSideChatFrame({
       width,
       theme,
@@ -863,7 +965,7 @@ export class SideChatOverlay implements Component, Focusable {
       headerLeft: left,
       headerRight: status,
       msgLines,
-      editorLines,
+      editorLines: decoratedEditorLines,
       hints: hintLines,
     });
     this.lastRenderHeight = lines.length;
@@ -871,7 +973,7 @@ export class SideChatOverlay implements Component, Focusable {
       this.options.tui.terminal.columns,
       this.options.tui.terminal.rows,
       msgLines.length,
-      editorLines.length,
+      decoratedEditorLines.length,
     );
     return lines;
   }
@@ -934,15 +1036,23 @@ export class SideChatOverlay implements Component, Focusable {
       return;
     }
     if (matchesAnyKey(data, KEYBINDINGS.copySelection.keys)) {
-      // Hotkey copy: with an active mouse selection, Ctrl+C / Ctrl+Shift+C
-      // copies it. Without one, Ctrl+C clears the input box (pi `app.clear`
-      // parity, spec #22); Ctrl+Shift+C falls through — pi binds no such
-      // key, so it stays a forced copy (terminal habit).
+      // Hotkey copy (spec #24): three-tier routing — chat selection first,
+      // then editor selection, then the legacy clear-input lane. Copying the
+      // editor selection consumes it so Ctrl+C then returns to clearing the
+      // input; a failed copy keeps it for retry. Bare Ctrl+C with no
+      // selection clears the input box (pi `app.clear` parity, spec #22);
+      // Ctrl+Shift+C falls through — pi binds no such key, so it stays a
+      // forced copy (terminal habit).
       if (this.messages.hasSelection()) {
         void this.copySelectionToClipboard();
         return;
       }
+      if (this.editorSelection.hasSelection()) {
+        void this.copyEditorSelectionToClipboard();
+        return;
+      }
       if (matchesKey(data, KEYBINDINGS.copySelection.keys[0])) {
+        this.editorSelection.clear();
         this.editor.setText("");
         this.options.tui.requestRender();
         return;
@@ -985,6 +1095,11 @@ export class SideChatOverlay implements Component, Focusable {
       this.options.tui.requestRender();
       return;
     }
+    // Any non-drag editor input (typing, cursor movement) clears the editor
+    // selection — transient by design (spec #24). The clear happens before
+    // the editor consumes the input so the next render never shows a stale
+    // highlight next to the moved cursor.
+    this.editorSelection.clear();
     this.editor.handleInput(data);
     this.options.tui.requestRender();
   }
@@ -999,6 +1114,11 @@ export class SideChatOverlay implements Component, Focusable {
     if (this.modelPicker) return;
     // Feature switch (D11): Ctrl+L is inert when model switching is off.
     if (!this.options.features.modelSwitch) return;
+    // Editor selection is transient: opening the picker clears it and aborts
+    // any in-flight editor drag, so the modal's mouse surface starts clean
+    // (spec #24).
+    this.gesture.cancel();
+    this.editorSelection.clear();
     if (this.runner.isRunning) {
       this.status.setSteady("feedback", {
         text: () => "Model switch unavailable while streaming",
@@ -1134,6 +1254,7 @@ export class SideChatOverlay implements Component, Focusable {
     // phase would do it, but handlePhase is a no-op once disposed).
     this.status.reset();
     this.runner.cancel();
+    this.editorSelection.clear();
     const messages = [...this.runner.agent.state.messages];
     this.options.onClose(action, messages);
   }

@@ -454,7 +454,7 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
   test("all features on: right-click and Ctrl+L are advertised", () => {
     const [primary, secondary] = buildSideChatHintLines({
       ...base,
-      features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
+      features: { rightClickCopyPaste: true, modelSwitch: true, retry: true, editorSelection: true },
     });
     expect(primary).toContain("R-click copy/paste");
     expect(secondary).toContain("C+l model");
@@ -463,7 +463,7 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
   test("copy-input hotkey is advertised in the primary hint row", () => {
     const [primary] = buildSideChatHintLines({
       ...base,
-      features: { rightClickCopyPaste: true, modelSwitch: true, retry: true },
+      features: { rightClickCopyPaste: true, modelSwitch: true, retry: true, editorSelection: true },
     });
     expect(primary).toContain("A+⇧C all");
   });
@@ -471,7 +471,7 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
   test("rightClickCopyPaste=false: the right-click hint is dropped, hotkey hint stays", () => {
     const [primary] = buildSideChatHintLines({
       ...base,
-      features: { rightClickCopyPaste: false, modelSwitch: true, retry: true },
+      features: { rightClickCopyPaste: false, modelSwitch: true, retry: true, editorSelection: true },
     });
     expect(primary).not.toContain("R-click");
     expect(primary).toContain("C+c copy");
@@ -480,7 +480,7 @@ describe("buildSideChatHintLines (D11 feature-aware hints)", () => {
   test("modelSwitch=false: the Ctrl+L hint is dropped, other Alt-actions stay", () => {
     const [, secondary] = buildSideChatHintLines({
       ...base,
-      features: { rightClickCopyPaste: true, modelSwitch: false, retry: true },
+      features: { rightClickCopyPaste: true, modelSwitch: false, retry: true, editorSelection: true },
     });
     expect(secondary).not.toContain("C+l");
     expect(secondary).toContain("A+w bg");

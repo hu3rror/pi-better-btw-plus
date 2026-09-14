@@ -42,6 +42,8 @@ export interface SideChatFeatures {
   modelSwitch: boolean;
   /** Turn-level auto-retry of transient provider errors. Default: true. */
   retry: boolean;
+  /** Left-drag selection on the input editor (spec #24). Default: true. */
+  editorSelection: boolean;
 }
 
 export interface SideChatConfig {
@@ -204,6 +206,7 @@ function parseConfigLayer(raw: unknown, dir: string): ConfigLayer {
           rightClickCopyPaste: parseBoolean(featureRec.rightClickCopyPaste),
           modelSwitch: parseBoolean(featureRec.modelSwitch),
           retry: parseBoolean(featureRec.retry),
+          editorSelection: parseBoolean(featureRec.editorSelection),
         }
       : undefined,
   };
@@ -287,12 +290,14 @@ const FEATURE_KEYS = [
   "rightClickCopyPaste",
   "modelSwitch",
   "retry",
+  "editorSelection",
 ] as const;
 function mergeFeatures(layers: ConfigLayer[]): SideChatFeatures {
   const features: SideChatFeatures = {
     rightClickCopyPaste: true,
     modelSwitch: true,
     retry: true,
+    editorSelection: true,
   };
   for (const layer of layers) {
     const layerFeatures = layer.features;

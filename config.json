@@ -18,6 +18,7 @@
   "features": {
     "rightClickCopyPaste": true,
     "modelSwitch": true,
-    "retry": true
+    "retry": true,
+    "editorSelection": true
   }
 }

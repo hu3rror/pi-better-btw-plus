@@ -535,13 +535,14 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
  * (`"retry": false`) without re-declaring the others.
  */
 describe("config.ts features (D11)", () => {
-  test("no features anywhere: all three default to true", () => {
+  test("no features anywhere: all four default to true", () => {
     const tree = makeTree({});
     try {
       expect(tree.load().features).toEqual({
         rightClickCopyPaste: true,
         modelSwitch: true,
         retry: true,
+        editorSelection: true,
       });
     } finally {
       tree.cleanup();
@@ -563,6 +564,7 @@ describe("config.ts features (D11)", () => {
         rightClickCopyPaste: true,
         modelSwitch: true,
         retry: true,
+        editorSelection: true,
       });
     } finally {
       tree.cleanup();
@@ -579,6 +581,7 @@ describe("config.ts features (D11)", () => {
         rightClickCopyPaste: false,
         modelSwitch: true,
         retry: true,
+        editorSelection: true,
       });
     } finally {
       tree.cleanup();
@@ -595,6 +598,7 @@ describe("config.ts features (D11)", () => {
         rightClickCopyPaste: true,
         modelSwitch: false,
         retry: true,
+        editorSelection: true,
       });
     } finally {
       tree.cleanup();
@@ -612,6 +616,7 @@ describe("config.ts features (D11)", () => {
         rightClickCopyPaste: true,
         modelSwitch: false,
         retry: true,
+        editorSelection: true,
       });
     } finally {
       tree.cleanup();
@@ -627,7 +632,21 @@ describe("config.ts features (D11)", () => {
         rightClickCopyPaste: true,
         modelSwitch: true,
         retry: true,
+        editorSelection: true,
       });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("editorSelection defaults true and can be disabled per layer (spec #24)", () => {
+    const tree = makeTree({
+      bundle: { features: { editorSelection: true } },
+      user: { features: { editorSelection: false } },
+      project: { features: { editorSelection: true } },
+    });
+    try {
+      expect(tree.load().features.editorSelection).toBe(true);
     } finally {
       tree.cleanup();
     }
