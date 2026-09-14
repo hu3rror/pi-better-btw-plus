@@ -464,6 +464,14 @@ export class SideChatOverlay implements Component, Focusable {
         chatAt: (row, col) => this.screenToChat(row, col),
         clampToChat: (row, col) => this.clampScreenToChat(row, col),
         overEditor: (row, _col) => this.isOverEditor(row),
+        // Editor surface (spec #24): the real hit-testing / selection store
+        // lands in T3 (#27). Until then these classify every editor press as
+        // off-surface, preserving the pre-editor-selection behavior (a left
+        // press on the input editor starts no drag; right-click still pastes).
+        editorAt: (_row, _col) => null,
+        clampToEditor: (_row, _col) => ({ line: 0, col: 0 }),
+        hasEditorSelection: () => false,
+        getEditorSelectionAnchor: () => null,
         hasSelection: () => this.messages.hasSelection(),
         getSelectionAnchor: () => this.messages.getSelectionAnchor(),
       },
