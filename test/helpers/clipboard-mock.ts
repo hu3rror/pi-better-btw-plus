@@ -10,6 +10,12 @@
  * would break it). Tests assert that the copied text flowed into the mocked
  * clipboard function rather than into platform-specific output.
  *
+ * The same mock also swaps `getSelectListTheme` for an identity theme: the
+ * overlay constructs the editor with those lazy closures and renders a
+ * `SelectList` whenever the autocomplete popup or model picker is open, and
+ * the real closures read pi's global theme singleton (throws "Theme not
+ * initialized" without initTheme). Same pattern as model-switch.test.ts.
+ *
  * Usage (each test file gets its own instance; import this before importing
  * anything that calls `copyToClipboard`, e.g. `side-chat-overlay.ts`):
  *
@@ -59,7 +65,20 @@ export function copiedTexts(): string[] {
 // `mock.module` applies to the importing test file's module graph, so the
 // overlay must be imported after this file.
 const real = await import("@earendil-works/pi-coding-agent");
+const identity = (text: string) => text;
 mock.module("@earendil-works/pi-coding-agent", () => ({
   ...real,
   copyToClipboard: (text: string) => impl(text),
+  // Lazy select-list theme closures normally read pi's global theme singleton
+  // (throws "Theme not initialized" without initTheme). The overlay constructs
+  // the editor with these at open time and renders a SelectList whenever the
+  // autocomplete popup or model picker is open, so suites that open those need
+  // a plain identity theme (same pattern as model-switch.test.ts).
+  getSelectListTheme: () => ({
+    selectedPrefix: identity,
+    selectedText: identity,
+    description: identity,
+    scrollInfo: identity,
+    noMatch: identity,
+  }),
 }));

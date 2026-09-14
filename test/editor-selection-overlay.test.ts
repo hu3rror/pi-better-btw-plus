@@ -1,11 +1,14 @@
 /**
- * Editor-selection overlay wiring integration tests (spec #24 T3, issue #27):
- * the T1 pure module + T2 gesture surface are wired into the real overlay —
- * left-drag over the input editor produces an inverse-video highlight and
- * Ctrl+C / Ctrl+Shift+C copy the selected text with three-tier routing. These
- * cases drive the real overlay through `handleMouseEvent` / `handleInput` and
- * assert the editor-selection store, the copied text, and the cross-surface
- * lifecycle — the thin-glue behaviors the pure-module suites can't see.
+ * Editor-selection overlay wiring integration tests (spec #24 T3+T4, issues
+ * #27/#28): the T1 pure module + T2 gesture surface are wired into the real
+ * overlay — left-drag over the input editor produces an inverse-video
+ * highlight; double-click resolves a word and triple-click resolves a visual
+ * line (T1's word/line solvers) with the same highlight + Ctrl+C copy chain;
+ * and while the editor's autocomplete popup is open the whole editor-drag
+ * surface (drag / double-click / triple-click) is gated off. These cases drive
+ * the real overlay through `handleMouseEvent` / `handleInput` and assert the
+ * editor-selection store, the copied text, and the cross-surface lifecycle —
+ * the thin-glue behaviors the pure-module suites can't see.
  *
  * Same overlay seam and clipboard write-side mock as test/select.test.ts.
  */
@@ -68,6 +71,85 @@ function dragEditor(overlay: Overlay, fromCol: number, toCol: number): void {
     row,
     isRelease: true,
   });
+}
+
+/**
+ * Two quick press+release pairs on the same cell (content-band line `line`,
+ * cell columns) — the raw SGR shape of a double-click. The second release
+ * resolves as `selectWord` in the gesture module.
+ */
+function doubleClickEditor(overlay: Overlay, col: number, line = 0): void {
+  const { row, col: originCol } = editorOrigin(overlay);
+  const r = row + line;
+  for (let i = 0; i < 2; i++) {
+    overlay.handleMouseEvent({
+      button: 0,
+      col: originCol + col,
+      row: r,
+      isRelease: false,
+    });
+    overlay.handleMouseEvent({
+      button: 0,
+      col: originCol + col,
+      row: r,
+      isRelease: true,
+    });
+  }
+}
+
+/**
+ * Three quick press+release pairs on the same cell (content-band line
+ * `line`) — the raw SGR shape of a triple-click. The third release resolves
+ * as `selectLine` (whole visual line) in the gesture module.
+ */
+function tripleClickEditor(overlay: Overlay, col: number, line = 0): void {
+  const { row, col: originCol } = editorOrigin(overlay);
+  const r = row + line;
+  for (let i = 0; i < 3; i++) {
+    overlay.handleMouseEvent({
+      button: 0,
+      col: originCol + col,
+      row: r,
+      isRelease: false,
+    });
+    overlay.handleMouseEvent({
+      button: 0,
+      col: originCol + col,
+      row: r,
+      isRelease: true,
+    });
+  }
+}
+
+/**
+ * Open the editor's autocomplete popup: seed a provider, then type ` @` so
+ * the `@` lands at a token boundary and triggers the regular (non-slash)
+ * autocomplete path. Returns once the popup is showing.
+ */
+async function openAutocomplete(overlay: Overlay): Promise<void> {
+  const editor = (overlay as any).editor as {
+    setAutocompleteProvider(provider: unknown): void;
+    isShowingAutocomplete(): boolean;
+  };
+  editor.setAutocompleteProvider({
+    getSuggestions: async () => ({
+      items: [{ value: "@user", label: "@user" }],
+      prefix: "@",
+    }),
+    applyCompletion: (
+      lines: string[],
+      cursorLine: number,
+      cursorCol: number,
+    ) => ({ lines, cursorLine, cursorCol }),
+  });
+  overlay.handleInput(" ");
+  overlay.handleInput("@");
+  // The editor debounces the request briefly, then awaits the async provider;
+  // a short macrotask wait flushes both.
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  if (!editor.isShowingAutocomplete()) {
+    throw new Error("autocomplete popup did not open");
+  }
 }
 
 function hasEditorSelection(overlay: Overlay): boolean {
@@ -236,5 +318,105 @@ describe("editor-selection overlay wiring (spec #24 T3)", () => {
 
     (overlay as any).dispose();
     expect(hasEditorSelection(overlay)).toBe(false);
+  });
+});
+
+describe("editor double/triple-click + autocomplete gating (spec #24 T4, issue #28)", () => {
+  test("double-click selects the word under the click and renders the highlight", () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    doubleClickEditor(overlay, 2); // inside "draft"
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    const frame = overlay.render(OVERLAY_TEST_WIDTH).join("\n");
+    expect(frame).toContain("\x1b[7mdraft\x1b[27m");
+    // The whole line is NOT selected — the word bounds came from the
+    // findWordBackward/Forward solver, not a full-line range.
+    expect(frame).not.toContain("\x1b[7mdraft text\x1b[27m");
+  });
+
+  test("double-click on the second word selects only that word", () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    doubleClickEditor(overlay, 8); // inside "text"
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    const frame = overlay.render(OVERLAY_TEST_WIDTH).join("\n");
+    expect(frame).toContain("\x1b[7mtext\x1b[27m");
+    expect(frame).not.toContain("\x1b[7mdraft\x1b[27m");
+  });
+
+  test("triple-click selects the whole visual line and renders the highlight", () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    tripleClickEditor(overlay, 2);
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    const frame = overlay.render(OVERLAY_TEST_WIDTH).join("\n");
+    expect(frame).toContain("\x1b[7mdraft text\x1b[27m");
+  });
+
+  test("triple-click selects the clicked visual line only (multi-line draft)", () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "first line");
+    overlay.handleInput("\n"); // ctrl+j: insert a new line
+    overlay.handleInput("second line");
+    overlay.render(OVERLAY_TEST_WIDTH);
+
+    // Line 1 of the content band = the second visual line.
+    tripleClickEditor(overlay, 3, 1);
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    const frame = overlay.render(OVERLAY_TEST_WIDTH).join("\n");
+    expect(frame).toContain("\x1b[7msecond line\x1b[27m");
+    expect(frame).not.toContain("\x1b[7mfirst line\x1b[27m");
+  });
+
+  test("Ctrl+C after a double-click copies the word and consumes the selection", async () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    doubleClickEditor(overlay, 2); // "draft"
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    overlay.handleInput("\x03");
+    await tick();
+    expect(copiedTexts()).toEqual(["draft"]);
+    expect(hasEditorSelection(overlay)).toBe(false);
+  });
+
+  test("Ctrl+C after a triple-click copies the line and consumes the selection", async () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    tripleClickEditor(overlay, 2); // whole visual line
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    overlay.handleInput("\x03");
+    await tick();
+    expect(copiedTexts()).toEqual(["draft text"]);
+    expect(hasEditorSelection(overlay)).toBe(false);
+  });
+
+  test("autocomplete popup open: editor drag / double-click / triple-click produce no selection", async () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    await openAutocomplete(overlay);
+    // Refresh geometry with the popup rows so the mouse coordinates match the
+    // band the user sees (editorAt still gates everything off regardless).
+    overlay.render(OVERLAY_TEST_WIDTH);
+
+    // Left-drag: no selection.
+    dragEditor(overlay, 0, 5);
+    expect(hasEditorSelection(overlay)).toBe(false);
+
+    // Double-click: no word selection.
+    doubleClickEditor(overlay, 2);
+    expect(hasEditorSelection(overlay)).toBe(false);
+
+    // Triple-click: no line selection.
+    tripleClickEditor(overlay, 2);
+    expect(hasEditorSelection(overlay)).toBe(false);
+
+    // The chat selection was never touched either (nothing classified).
+    expect((overlay as any).messages.hasSelection()).toBe(false);
   });
 });
