@@ -88,22 +88,31 @@ The `[paste #N +X lines]` / `[paste #N X chars]` placeholder the editor inserts 
 large pastes (>10 lines or >1000 chars), expanded back to full text at submit.
 
 **Pointer gesture**:
-The overlay's mouse interaction model — press/drag/double-click selection, wheel
-scroll, right-click copy and paste. The umbrella term over mouse selection.
+The overlay's mouse interaction model — press/drag/double-/triple-click
+selection, wheel scroll, right-click copy and paste. The umbrella term over chat
+selection and editor selection.
+_Avoid_: "mouse selection" as the umbrella — two surface-bound selections exist now.
 
-**Mouse selection**:
-The drag-selection gesture: left-drag anchors a range, double-click selects a
-line. One pointer gesture; the selection it leaves is the single source for
-hotkey copy (Ctrl+C / Ctrl+Shift+C) and right-click copy; a successful copy
-consumes it (spec #22), so Ctrl+C returns to clearing the input once the
-highlight is gone.
+**Chat selection**:
+The drag-selection gesture on the message area: left-drag anchors a range,
+double-click (and triple-click) select a rendered line. Hotkey copy (Ctrl+C /
+Ctrl+Shift+C) copies it with priority over editor selection; right-click copy over
+the message area copies it; a successful copy consumes it (spec #22).
+_Avoid_: "mouse selection" — the pre-editor-selection name; two surfaces exist now, use
+the surface-bound term.
+
+**Editor selection**:
+The drag-selection gesture on the input editor: left-drag anchors a range in
+editor visual-line space, double-click selects a word, triple-click selects a
+logical line. Transient — any non-drag editor input or a plain click clears it; a
+successful hotkey copy consumes it. Never crosses a paste marker (clipped at its
+boundary). Hotkey-only copy: right-click over the editor stays paste.
 
 **Clear input** (Ctrl+C, 无选中):
-With no active mouse selection, Ctrl+C clears the input box — pi `app.clear`
-(`clearEditor`) parity. Copying consumes the selection (spec #22), so Ctrl+C
-returns to clearing once the copied highlight is gone.
+With no active chat selection and no editor selection, Ctrl+C clears the input
+editor — pi `app.clear` (`clearEditor`) parity. Copying consumes the selection
+(spec #22), so Ctrl+C returns to clearing once the copied highlight is gone.
 _Avoid_: calling it "clear" — that's Alt+N (start an empty conversation).
-
 **Input editor**:
 The single text input the fork renders at the bottom of the overlay (a pi-tui
 `Editor` widget) — the side chat's draft surface, hit-tested via `isOverEditor`.
