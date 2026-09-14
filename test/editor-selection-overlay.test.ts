@@ -234,6 +234,18 @@ describe("editor-selection overlay wiring (spec #24 T3)", () => {
     expect(hasEditorSelection(overlay)).toBe(false);
   });
 
+  test("cursor movement clears the editor selection", () => {
+    const overlay = makeOverlay();
+    seedEditor(overlay, "draft text");
+    dragEditor(overlay, 0, 5);
+    expect(hasEditorSelection(overlay)).toBe(true);
+
+    // Any non-drag editor input — arrow keys included — clears the transient
+    // selection before the editor consumes the key (spec #24 US8).
+    overlay.handleInput("\x1b[C"); // right arrow
+    expect(hasEditorSelection(overlay)).toBe(false);
+  });
+
   test("a plain click on the editor clears the editor selection", () => {
     const overlay = makeOverlay();
     seedEditor(overlay, "draft text");
