@@ -17,9 +17,10 @@
  *   commands keep their last operand as the write target);
  * - `/dev/*` targets and `-flags` are never write paths.
  *
- * KNOWN LIMITATION (backlog issue): in-place writers (`sed -i`, `perl -pi`,
- * `awk -i inplace`) are not special-cased, so their targets go undetected.
- * Fixing them is a behaviour extension, not a correctness fix.
+ * KNOWN LIMITATION: space-separated suffix arguments (BSD/macOS
+ * `sed -i .bak file`) and gawk's `--include inplace` are not recognised —
+ * only the tight-suffix and merged-flag forms (`-i.bak`, `-pi`),
+ * `-i inplace`, and `--in-place[=…]`.
  */
 export function extractWritePaths(toolName: string, args: unknown): string[] {
   const record = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
@@ -153,6 +154,9 @@ function tokenizeShell(command: string): ShellToken[] {
   return tokens;
 }
 
+/** Commands whose option grammar can select in-place writes. */
+const IN_PLACE_COMMANDS: ReadonlySet<string> = new Set(["sed", "perl", "awk"]);
+
 /** Redirect ops that push their target as a write path. */
 const REDIRECT_PUSH: ReadonlySet<ShellToken["value"]> = new Set([">", ">>", "&>", "&>>"]);
 
@@ -182,6 +186,68 @@ function collectSegmentWritePaths(segment: ShellToken[], paths: string[]): void 
   if ((command.value === "cp" || command.value === "mv") && operands.length >= 2) {
     pushPath(paths, operands[operands.length - 1]);
   }
+  if (IN_PLACE_COMMANDS.has(command.value)) {
+    for (const target of collectInPlaceTargets(command.value, segment.slice(commandIndex + 1))) {
+      pushPath(paths, target);
+    }
+  }
+}
+
+/**
+ * Targets of in-place writers, empty unless the in-place marker is active:
+ * sed `-i[SUFFIX]` / `--in-place[=…]`, perl the same plus merged short flags
+ * (`-pi`), awk (gawk) `-i inplace`. After the marker the first non-option
+ * argument is the script/program and everything after it is a target file.
+ */
+function collectInPlaceTargets(command: string, tokens: ShellToken[]): string[] {
+  let inPlace = false;
+  let sawScript = false;
+  let pendingArg: "script" | "skip" | "library" | null = null;
+  const targets: string[] = [];
+
+  for (const token of tokens) {
+    if (token.type === "op") break;
+    const value = token.value;
+
+    if (pendingArg) {
+      if (pendingArg === "script") sawScript = true;
+      else if (pendingArg === "library" && (value === "inplace" || value === "inplace.awk")) inPlace = true;
+      pendingArg = null;
+      continue;
+    }
+
+    if (value === "--") continue;
+
+    if (value.startsWith("-")) {
+      if (command === "awk") {
+        if (value === "-i") pendingArg = "library";
+        else if (value === "-f" || value === "-e" || value === "-E") pendingArg = "script";
+        else if (value === "-v" || value === "-F") pendingArg = "skip";
+      } else if (command === "perl") {
+        if (isInPlaceFlag(value)) inPlace = true;
+        if (value === "-e" || value === "-E") pendingArg = "script";
+        else if (value === "-I" || value === "-M" || value === "-m" || value === "-F") pendingArg = "skip";
+      } else {
+        if (isInPlaceFlag(value)) inPlace = true;
+        if (value === "-e" || value === "-f") pendingArg = "script";
+      }
+      continue;
+    }
+
+    if (!sawScript) {
+      sawScript = true;
+      continue;
+    }
+    targets.push(value);
+  }
+
+  return inPlace ? targets : [];
+}
+
+/** `-i` / `-i<SUFFIX>`, merged perl short flags (`-pi`), `--in-place[=…]`.
+ *  Lowercase-only, so perl's `-I<dir>` include path never matches. */
+function isInPlaceFlag(value: string): boolean {
+  return /^-[a-z]*i/.test(value) || value.startsWith("--in-place");
 }
 
 function collectCommandOperands(tokens: ShellToken[]): string[] {
