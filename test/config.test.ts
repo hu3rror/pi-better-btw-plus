@@ -254,7 +254,8 @@ describe("config.ts layered resolution", () => {
  * loadRetryPolicy reads pi's own settings files — global
  * <agentConfigDir>/settings.json merged with project <cwd>/.pi/settings.json
  * (project wins per key, pi's deepMergeSettings semantics) — and extracts the
- * `retry` block with pi's defaults (enabled=true, maxRetries=3, baseDelayMs=2000).
+ * `retry` block with pi's defaults (enabled=true, maxRetries=3, baseDelayMs=2000,
+ * maxAgentDelayMs=60000).
  */
 describe("loadRetryPolicy (pi settings.retry)", () => {
   function makeRetryTree(overrides: {
@@ -293,6 +294,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: true,
         maxRetries: 3,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
       });
     } finally {
       tree.cleanup();
@@ -308,6 +310,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: true,
         maxRetries: 8,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
       });
     } finally {
       tree.cleanup();
@@ -324,6 +327,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: true,
         maxRetries: 2,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
       });
     } finally {
       tree.cleanup();
@@ -339,6 +343,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: false,
         maxRetries: 3,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
       });
     } finally {
       tree.cleanup();
@@ -355,7 +360,12 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         cwd: tree.cwd,
         onWarning: (m) => warnings.push(m),
       });
-      expect(policy).toEqual({ enabled: true, maxRetries: 3, baseDelayMs: 2000 });
+      expect(policy).toEqual({
+        enabled: true,
+        maxRetries: 3,
+        baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
+      });
       expect(warnings.some((w) => w.includes("settings"))).toBe(true);
     } finally {
       tree.cleanup();
@@ -369,6 +379,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: true,
         maxRetries: 3,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
       });
     } finally {
       tree.cleanup();
@@ -390,6 +401,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: true,
         maxRetries: 8,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
         provider: { timeoutMs: 5000, maxRetries: 15, maxRetryDelayMs: 30000 },
       });
     } finally {
@@ -515,6 +527,22 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
     }
   });
 
+  test("maxAgentDelayMs is forwarded (pi 0.86.0 backoff ceiling)", () => {
+    const tree = makeRetryTree({
+      global: { retry: { maxAgentDelayMs: 30000 } },
+    });
+    try {
+      expect(tree.load()).toEqual({
+        enabled: true,
+        maxRetries: 3,
+        baseDelayMs: 2000,
+        maxAgentDelayMs: 30000,
+      });
+    } finally {
+      tree.cleanup();
+    }
+  });
+
   test("present retry block with missing keys falls back to pi defaults", () => {
     const tree = makeRetryTree({ global: { retry: { enabled: true } } });
     try {
@@ -522,6 +550,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
         enabled: true,
         maxRetries: 3,
         baseDelayMs: 2000,
+        maxAgentDelayMs: 60000,
       });
     } finally {
       tree.cleanup();

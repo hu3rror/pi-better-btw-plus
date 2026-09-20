@@ -72,7 +72,8 @@ export const AGENT_CONFIG_DIR = join(homedir(), ".pi", "agent");
  * Read pi's `settings.retry` budget (D8) via pi's own `SettingsManager` —
  * file reading, deep merge (project wins per key), legacy migration
  * (`retry.maxDelayMs` → `retry.provider.maxRetryDelayMs`) and the canonical
- * defaults (enabled=true, maxRetries=3, baseDelayMs=2000) all come from pi; no
+ * defaults (enabled=true, maxRetries=3, baseDelayMs=2000, maxAgentDelayMs=60000)
+ * all come from pi; no
  * hand-rolled duplicate. The `retry.provider` block (spec #20 D4: timeoutMs /
  * maxRetries / maxRetryDelayMs) is forwarded only when a provider block is
  * actually configured, and only number keys; it is consumed solely by the
@@ -128,6 +129,9 @@ export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPoli
     enabled: retry.enabled,
     maxRetries: retry.maxRetries,
     baseDelayMs: retry.baseDelayMs,
+    // Backoff ceiling (pi 0.86.0): getRetrySettings() already applies the
+    // 60s default, so forwarding it always mirrors pi's agent loop exactly.
+    maxAgentDelayMs: retry.maxAgentDelayMs,
     ...(Object.keys(providerBlock).length > 0 ? { provider: providerBlock } : {}),
   };
 }

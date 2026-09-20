@@ -84,12 +84,14 @@ describe("classifyRetryable", () => {
   test("transient provider errors are retryable (overloaded / rate limit / 5xx)", () => {
     const retryable = [
       "The model is overloaded, please try again later",
+      "The model is currently experiencing high demand",
       "rate limit reached, slow down",
       "429 Too Many Requests",
       "500 Internal Server Error",
       "502 Bad Gateway",
       "503 Service Unavailable",
       "504 Gateway Timeout",
+      "520 Cloudflare error",
       "524 A Timeout Occurred",
       "upstream service unavailable",
       "internal server error",
@@ -254,6 +256,24 @@ describe("runWithRetry", () => {
     expect(outcome.result).toBe(f);
     expect(outcome.delays).toEqual([1000, 2000, 4000]);
     expect(outcome.notices).toHaveLength(3);
+  });
+
+  test("backoff is capped at maxAgentDelayMs (pi 0.86.0 parity)", async () => {
+    const f = err("overloaded");
+    const outcome = await run([f], {
+      policy: { maxRetries: 5, baseDelayMs: 1000, maxAgentDelayMs: 2000 },
+    });
+    // 1000, then 2000, 4000, 8000, 16000 all capped to 2000.
+    expect(outcome.delays).toEqual([1000, 2000, 2000, 2000, 2000]);
+    expect(outcome.notices.map((n) => n.delayMs)).toEqual([1000, 2000, 2000, 2000, 2000]);
+  });
+
+  test("backoff defaults to the 60s ceiling without maxAgentDelayMs", async () => {
+    const f = err("overloaded");
+    const outcome = await run([f], {
+      policy: { maxRetries: 2, baseDelayMs: 1_000_000 },
+    });
+    expect(outcome.delays).toEqual([60000, 60000]);
   });
 
   test("cancel during the backoff wait returns the last error without more attempts", async () => {

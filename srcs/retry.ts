@@ -3,12 +3,11 @@
  * injectable retry loop the fork's turn cycle wraps around `agent.prompt()`.
  *
  * The engine mirrors pi's turn retry semantics verbatim — classification
- * patterns are transcribed from `@earendil-works/pi-ai@0.85.1` (see
+ * patterns are transcribed from `@earendil-works/pi-ai@0.86.0` (see
  * `dist/utils/retry.js` and `dist/utils/overflow.js`, themselves the pieces
- * `AgentSession._isRetryableError` composes). The fork targets pi 0.85.1 but
- * the repo's devDependencies pin pi-ai 0.84.2, which does not export those
- * helpers, so the tables are copied here (with their source annotations)
- * rather than imported — "照抄语义，不发明私有协议".
+ * `AgentSession._isRetryableError` composes). The tables are copied here
+ * (with their source annotations) rather than imported so the engine stays a
+ * pure, pi-runtime-free module driven by fakes in tests — "照抄语义，不发明私有协议".
  *
  * The loop is fully injected so tests drive it with a fake agent (scripted
  * attempt results) and a fake clock (recorded delays); the engine itself has
@@ -24,7 +23,7 @@ export interface RetryableFailure {
 }
 
 // =============================================================================
-// Classifier (pi-ai 0.85.1 semantics)
+// Classifier (pi-ai 0.86.0 semantics)
 // =============================================================================
 
 /** Non-retryable provider limit / billing exhaustion patterns (pi retry.js). */
@@ -52,6 +51,7 @@ const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
 const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
   // Generic provider load, HTTP status, and server-side transient failures.
   "overloaded",
+  "currently experiencing high demand",
   "rate.?limit",
   "too many requests",
   "429",
@@ -59,6 +59,7 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
   "502",
   "503",
   "504",
+  "520",
   "524",
   "service.?unavailable",
   "server.?error",
@@ -138,7 +139,10 @@ const OVERFLOW_PATTERNS = [
   /context[_ ]length[_ ]exceeded/i, // Generic fallback
   /too many tokens/i, // Generic fallback
   /token limit exceeded/i, // Generic fallback
-  /^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i, // Cerebras: 400/413 with no body
+  // Cerebras: 400/413 with no body. pi 0.86.0 gates this on provider ===
+  // "cerebras"; the fork matches unconditionally (ADR 0007) — a bodyless
+  // 400/413 never retries either way.
+  /^4(?:00|13)\s*(?:status code)?\s*\(no body\)/i,
 ];
 
 /**
@@ -164,7 +168,7 @@ function toRetryableFailure(error: RetryableInput): RetryableFailure | null {
   return null;
 }
 
-/** isContextOverflow mirror (pi-ai 0.85.1 dist/utils/overflow.js). */
+/** isContextOverflow mirror (pi-ai 0.86.0 dist/utils/overflow.js). */
 function isContextOverflow(message: RetryableFailure, contextWindow?: number): boolean {
   // Case 1: error-message patterns.
   if (message.stopReason === "error" && message.errorMessage) {
@@ -192,7 +196,7 @@ function isContextOverflow(message: RetryableFailure, contextWindow?: number): b
   return false;
 }
 
-/** isRetryableAssistantError mirror (pi-ai 0.85.1 dist/utils/retry.js). */
+/** isRetryableAssistantError mirror (pi-ai 0.86.0 dist/utils/retry.js). */
 function isRetryableAssistantError(message: RetryableFailure): boolean {
   if (message.stopReason !== "error" || !message.errorMessage) return false;
   if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(message.errorMessage)) return false;
@@ -228,6 +232,13 @@ export interface RetryPolicy {
   maxRetries: number;
   baseDelayMs: number;
   /**
+   * Backoff ceiling (pi 0.86.0 `retryDelayMs`): exponential delays are capped
+   * here so long retry runs stay responsive; pi reads it from
+   * `settings.retry.maxAgentDelayMs` and defaults to 60s
+   * ({@link DEFAULT_MAX_AGENT_RETRY_DELAY_MS}).
+   */
+  maxAgentDelayMs?: number;
+  /**
    * HTTP-layer retry knobs (`settings.retry.provider`, spec #20 D4): consumed
    * only by the overlay's stream assembly (injectProviderRetry) — pi's
    * streamSimple retries at the request layer before any assistant message
@@ -242,7 +253,8 @@ export interface RetryAttemptInfo {
   attempt: number;
   /** Total retry budget (`policy.maxRetries`). */
   maxAttempts: number;
-  /** Backoff for this retry: `baseDelayMs * 2^(attempt-1)`. */
+  /** Backoff for this retry: `baseDelayMs * 2^(attempt-1)`, capped at
+   * `maxAgentDelayMs` (default 60s). */
   delayMs: number;
   /** Error text of the failed result. */
   errorMessage: string;
@@ -270,6 +282,10 @@ export interface RunWithRetryOptions {
   /** Retry budget + backoff base (`settings.retry` shape). */
   policy: RetryPolicy;
 }
+
+/** pi 0.86.0 DEFAULT_MAX_AGENT_RETRY_DELAY_MS: agent backoff ceiling when
+ * `settings.retry` sets no maxAgentDelayMs. */
+export const DEFAULT_MAX_AGENT_RETRY_DELAY_MS = 60_000;
 
 /** Abortable setTimeout sleep, mirroring pi's retry sleep behavior. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -319,7 +335,8 @@ function extractErrorMessage(result: unknown): string {
  *
  * - A non-retryable result (success, abort, overflow, quota, …) returns as-is;
  * - a retryable failure retries up to `policy.maxRetries` times with
- *   `baseDelayMs * 2^(n-1)` backoff, emitting `onAttempt` before each wait;
+ *   `baseDelayMs * 2^(n-1)` backoff capped at `policy.maxAgentDelayMs`
+ *   (default 60s, pi 0.86.0 parity), emitting `onAttempt` before each wait;
  * - budget exhaustion returns the final error result unchanged;
  * - an aborted `signal` interrupts the backoff wait — an abort that lands
  *   before a wait is scheduled skips it entirely — and returns the last
@@ -349,7 +366,11 @@ export async function runWithRetry(options: RunWithRetryOptions): Promise<unknow
     // skip scheduling a wait that would be interrupted immediately.
     if (signal?.aborted) return result;
     retryCount++;
-    const delayMs = baseDelayMs * 2 ** (retryCount - 1);
+    // pi 0.86.0 retryDelayMs: exponential backoff with an overflow guard,
+    // capped at maxAgentDelayMs (default 60s).
+    const rawDelay = baseDelayMs * 2 ** (retryCount - 1);
+    const safeDelay = Number.isSafeInteger(rawDelay) ? rawDelay : Number.MAX_SAFE_INTEGER;
+    const delayMs = Math.min(safeDelay, policy.maxAgentDelayMs ?? DEFAULT_MAX_AGENT_RETRY_DELAY_MS);
     await onAttempt?.({
       attempt: retryCount,
       maxAttempts,

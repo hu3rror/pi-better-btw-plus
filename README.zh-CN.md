@@ -25,6 +25,10 @@ pi install npm:pi-better-btw-plus
 
 在 pi TUI 里用 `/btw`（别名 `/side`）或 `Alt+W` 打开旁路会话。提问、`Enter` 发送、`Esc` 关闭；重新打开继续同一段对话。
 
+## 兼容性
+
+已验证 pi `0.86.0`（`@earendil-works/pi-*` devDependencies 锁定 typecheck 与测试所针对的版本）。
+
 ## 亮点
 
 `@yceachan/pi-better-btw` 的全部功能都在——aside-agent 自我认知、只读车道强制、prompt pack 覆盖、`peek_main`、对话导出。本 fork 另新增：

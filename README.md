@@ -25,6 +25,10 @@ pi install npm:pi-better-btw-plus
 
 In pi's TUI, open the side chat with `/btw` (alias `/side`) or `Alt+W`. Ask, press `Enter`, close with `Esc`. Reopening continues the same conversation.
 
+## Compatibility
+
+Verified against pi `0.86.0` (the `@earendil-works/pi-*` devDependencies pin the typecheck and test surface).
+
 ## Highlights
 
 Everything in `@yceachan/pi-better-btw` is here — aside-agent self-cognition, read-only lane enforcement, prompt-pack overrides, `peek_main`, transcript export. This fork adds:
