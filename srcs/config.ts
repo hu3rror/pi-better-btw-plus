@@ -129,7 +129,7 @@ export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPoli
     enabled: retry.enabled,
     maxRetries: retry.maxRetries,
     baseDelayMs: retry.baseDelayMs,
-    // Backoff ceiling (pi 0.86.0): getRetrySettings() already applies the
+    // Backoff ceiling (pi 0.87.1): getRetrySettings() already applies the
     // 60s default, so forwarding it always mirrors pi's agent loop exactly.
     maxAgentDelayMs: retry.maxAgentDelayMs,
     ...(Object.keys(providerBlock).length > 0 ? { provider: providerBlock } : {}),

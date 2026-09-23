@@ -527,7 +527,7 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
     }
   });
 
-  test("maxAgentDelayMs is forwarded (pi 0.86.0 backoff ceiling)", () => {
+  test("maxAgentDelayMs is forwarded (pi 0.87.1 backoff ceiling)", () => {
     const tree = makeRetryTree({
       global: { retry: { maxAgentDelayMs: 30000 } },
     });

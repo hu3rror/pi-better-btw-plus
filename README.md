@@ -27,7 +27,7 @@ In pi's TUI, open the side chat with `/btw` (alias `/side`) or `Alt+W`. Ask, pre
 
 ## Compatibility
 
-Verified against pi `0.86.0` (the `@earendil-works/pi-*` devDependencies pin the typecheck and test surface).
+Verified against pi `0.87.1` (the `@earendil-works/pi-*` devDependencies pin the typecheck and test surface).
 
 ## Highlights
 

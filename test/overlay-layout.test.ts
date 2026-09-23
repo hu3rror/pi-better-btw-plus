@@ -5,8 +5,8 @@
  *
  * 1. the mirror contract — resolveLayout reproduces pi-tui's private
  *    TuiBase.resolveOverlayLayout semantics. Verified against the actual
- *    sources: the method is byte-identical in pi-tui 0.86.0 (dist/tui.js
- *    L781-902, devDep and runtime), including parseSizeValue (0.86.0
+ *    sources: the method is byte-identical in pi-tui 0.87.1 (dist/tui.js
+ *    L781-869, devDep and runtime), including parseSizeValue (0.87.1
  *    L57-68). All expected values below are hand-derived from those sources.
  * 2. the frame-geometry invariants — msgTopRow = outer row + FRAME_HEADER_LINES,
  *    contentCol = outer col + FRAME_SIDE_PADDING, innerWidth = outer width − 4,
@@ -38,7 +38,7 @@ describe("LAYOUT (single source for overlay options)", () => {
   });
 });
 
-describe("resolveLayout mirror contract (pi-tui 0.86.0)", () => {
+describe("resolveLayout mirror contract (pi-tui 0.87.1)", () => {
   const cases: {
     name: string;
     termWidth: number;

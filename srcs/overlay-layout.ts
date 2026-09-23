@@ -153,8 +153,8 @@ function resolveAnchorCol(
 /**
  * Resolve the overlay's outer box — a mirror of pi-tui's private
  * TuiBase.resolveOverlayLayout, verified byte-identical against the version
- * this extension runs with: pi-tui 0.86.0 (dist/tui.js L781-902, devDep and
- * runtime); parseSizeValue 0.86.0 L57-68.
+ * this extension runs with: pi-tui 0.87.1 (dist/tui.js L781-869, devDep and
+ * runtime); parseSizeValue 0.87.1 L57-68.
  *
  * SWAP POINT: if pi ever exposes this resolver publicly, replace the whole
  * body with `return resolveOverlayLayout(options, frameHeight, termWidth,
@@ -287,7 +287,7 @@ export function computeSideChatHeight(rows: number): number {
  * The maxHeight comes from the same percent+clamp branch as resolveLayout
  * (resolveOverlayMaxHeight) — the overlay no longer keeps its own copy; pi
  * itself clamps the rendered overlay to maxHeight at composition time
- * (tui.js L924-926), so the band is lastRenderHeight capped by maxHeight.
+ * (tui.js L925-926), so the band is lastRenderHeight capped by maxHeight.
  */
 export function computeOverlayViewport(
   termRows: number,

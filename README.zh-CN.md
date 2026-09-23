@@ -27,7 +27,7 @@ pi install npm:pi-better-btw-plus
 
 ## 兼容性
 
-已验证 pi `0.86.0`（`@earendil-works/pi-*` devDependencies 锁定 typecheck 与测试所针对的版本）。
+已验证 pi `0.87.1`（`@earendil-works/pi-*` devDependencies 锁定 typecheck 与测试所针对的版本）。
 
 ## 亮点
 
