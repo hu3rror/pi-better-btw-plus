@@ -2,3 +2,10 @@
 # Tests share a process.stdout interception for the OSC 52 fallback;
 # run them serially so the capture array is not raced.
 concurrency = 1
+
+# The `test` script in package.json must keep `bun test --isolate`. paste.test.ts
+# installs a process-global `mock.module` for clipboard-read.ts, and Bun has no
+# API to remove a module mock — without per-file isolation it leaks into
+# clipboard-read.test.ts whenever Bun's (platform-dependent) file order runs
+# paste first, turning every real clipboard read into the mock's last value.
+# `isolate` is not a bunfig option, so it lives on the CLI flag only.

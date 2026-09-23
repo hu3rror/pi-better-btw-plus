@@ -42,7 +42,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test test/"
+    "test": "bun test --isolate test/"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
