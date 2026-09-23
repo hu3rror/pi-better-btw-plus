@@ -10,10 +10,7 @@
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["bun-types", "node"],
-    "paths": {
-      "@sinclair/typebox": ["./node_modules/typebox/build/index.d.mts"]
-    }
+    "types": ["bun-types", "node"]
   },
   "include": ["srcs/**/*.ts", "test/**/*.ts"]
 }
