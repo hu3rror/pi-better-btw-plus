@@ -67,8 +67,8 @@ Three behavioral drifts and one dependency drift were found against the host:
 
 ## Consequences
 
-- Windows right-click and Ctrl+V paste regain the native read path;
-  `[NEEDS MANUAL VERIFICATION]` on Windows latency until measured by hand.
+- Windows right-click and Ctrl+V paste regain the native read path; manually
+  verified on Windows — no paste latency perceived.
 - The overlay-layout mirror (`srcs/overlay-layout.ts`) was re-verified against
   pi-tui 0.87.1 `dist/tui.js`: `resolveOverlayLayout` L781-869 (was L781-902),
   `parseSizeValue` L57-68, composition maxHeight clamp L925-926, second row/col
