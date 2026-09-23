@@ -70,6 +70,7 @@ function makeRegistry(
     getAvailable: () => available,
     hasConfiguredAuth: (model: { id: string }) => authed.includes(model.id),
     getProviderDisplayName: () => providerDisplayName,
+    streamSimple: async () => {},
   };
 }
 

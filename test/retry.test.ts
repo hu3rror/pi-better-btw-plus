@@ -131,6 +131,9 @@ describe("classifyRetryable", () => {
   test("context overflow is not retryable", () => {
     const overflow = [
       "prompt is too long: 213462 tokens > 200000 maximum",
+      "prompt too long", // bare z.ai wording (no "is")
+      "Prompt too long",
+      '{"code":"1261","message":"Prompt too long"}', // z.ai JSON error body
       "413 {\"error\":{\"type\":\"request_too_large\"}}",
       "Your input exceeds the context window of this model",
       "Requested token count exceeds the model's maximum context length of 131072 tokens",
@@ -147,6 +150,27 @@ describe("classifyRetryable", () => {
       "Prompt has 300000 tokens, but the configured context size is 200000 tokens",
     ];
     for (const message of overflow) {
+      expect(classifyRetryable(err(message))).toBe(false);
+    }
+  });
+
+  test("z.ai bare wording via an Error normalization path is never retried", () => {
+    // The bare-wording strings already sit in the "context overflow" list;
+    // this only pins the Error normalization path for z.ai style text.
+    expect(classifyRetryable(new Error("Prompt too long"))).toBe(false);
+    expect(classifyRetryable(new Error('{"code":"1261","message":"Prompt too long"}'))).toBe(false);
+  });
+
+  test("overflow wording wins over retryable wording (checked first, pi order)", () => {
+    // The z.ai overflow text embedded in a message that also matches a
+    // retryable pattern ("500") must classify as overflow — never retried,
+    // mirroring pi's publishResponse where the overflow branch precedes the
+    // retryable branch.
+    for (const message of [
+      "Prompt too long, 500 Internal Server Error",
+      "500 Internal Server Error: Prompt too long",
+      "prompt is too long: 500 (retry your request)",
+    ]) {
       expect(classifyRetryable(err(message))).toBe(false);
     }
   });
@@ -258,7 +282,7 @@ describe("runWithRetry", () => {
     expect(outcome.notices).toHaveLength(3);
   });
 
-  test("backoff is capped at maxAgentDelayMs (pi 0.86.0 parity)", async () => {
+  test("backoff is capped at maxAgentDelayMs (pi 0.87.1 parity)", async () => {
     const f = err("overloaded");
     const outcome = await run([f], {
       policy: { maxRetries: 5, baseDelayMs: 1000, maxAgentDelayMs: 2000 },

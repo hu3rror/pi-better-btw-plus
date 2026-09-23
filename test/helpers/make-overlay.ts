@@ -52,7 +52,7 @@ export function makeOverlay(
       extensionTools: [],
     },
     tracker: { writeCount: 0 },
-    modelRegistry: {},
+    modelRegistry: { streamSimple: async () => {} },
     sessionManager: { getEntries: () => [], getLeafId: () => null },
     promptPack: {
       framing: "",

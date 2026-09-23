@@ -4,15 +4,18 @@
  *
  * The write side is pi's own `copyToClipboard` (public export); the read side
  * is self-built because `readClipboardText` is not re-exported from the
- * package entry. The PRIMARY channel mirrors pi's own `readClipboardText` (the
- * `@mariozechner/clipboard` native addon); the remaining channels — PowerShell
- * `Get-Clipboard -Raw` (win32), `pbpaste` (darwin), and an OSC 52 query — are
- * extension-only fallbacks pi's read side does not have:
+ * package entry. The PRIMARY channel reads through pi-tui's
+ * `getNativeClipboard()` (pi 0.87.1's bundled native helper — the same one
+ * the main session's `readClipboardText` uses); the remaining channels —
+ * PowerShell `Get-Clipboard -Raw` (win32), `pbpaste` (darwin), and an OSC 52
+ * query — are extension-only fallbacks pi's read side does not have:
  *
- *   - win32  → native addon `getText`, then PowerShell `Get-Clipboard -Raw`,
+ *   - win32  → native helper `getText`, then PowerShell `Get-Clipboard -Raw`,
  *     then an OSC 52 query;
- *   - darwin → native addon `getText`, then `pbpaste`, then OSC 52 query;
- *   - linux  → OSC 52 query (`\x1b]52;c;?\x07`, read the reply).
+ *   - darwin → native helper `getText`, then `pbpaste`, then OSC 52 query;
+ *   - linux  → native helper `getText` when an X11 display is available
+ *     (`getNativeClipboard()` returns undefined without `DISPLAY`), then the
+ *     OSC 52 query.
  *
  * Channels are injected functions, so tests mock success / fallback /
  * all-fail without touching the host clipboard. The reader never throws:
@@ -22,9 +25,10 @@
  */
 import { spawnSync } from "node:child_process";
 
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import {
+  getNativeClipboard,
+  type NativeClipboard,
+} from "@earendil-works/pi-tui";
 /**
  * Outcome of reading the system clipboard: text, an explicitly empty
  * clipboard (a channel ran and saw nothing), or no usable channel at all.
@@ -166,76 +170,56 @@ function makeCommandChannel(
 }
 
 /**
- * Native clipboard addon (win32 / darwin primary read channel): the
- * `@mariozechner/clipboard` napi addon pi itself uses for reads and writes.
- * Its `getText` is a sub-millisecond, non-blocking call — vs. the PowerShell
- * `Get-Clipboard` subprocess, which cold-starts ~1s and blocks the event loop
- * with `spawnSync` (the source of the right-click-paste lag). Resolution
- * mirrors pi's `clipboard-native` loader: the package's own `require` first,
- * then a `require` rooted at the pi executable's directory.
- *
- * The addon is an optional dependency provided at runtime by the pi host
- * environment — deliberately not listed in package.json to avoid
- * cross-platform prebuild dependency issues. When it is missing or fails to
- * load, the channel reports `unavailable` and the fallback chain
- * (PowerShell / pbpaste → OSC 52) takes over.
+ * The slice of pi-tui's {@link NativeClipboard} the read path consumes
+ * (injected narrow slice: the channel never touches `getImage`/`setText`).
  */
-export interface NativeClipboardAddon {
-  /** Resolve the clipboard's plain text; null when it holds no text. */
-  getText(): Promise<string | null>;
-}
+export type NativeClipboardReader = Pick<NativeClipboard, "getText">;
 
-let cachedNativeAddon: NativeClipboardAddon | null | undefined;
-
-function loadNativeAddon(): NativeClipboardAddon | null {
-  if (cachedNativeAddon !== undefined) return cachedNativeAddon;
-  const moduleRequire = createRequire(import.meta.url);
-  const executableDirRequire = createRequire(
-    pathToFileURL(join(dirname(process.execPath), "package.json")).href,
-  );
-  cachedNativeAddon = null;
-  for (const requireClipboard of [moduleRequire, executableDirRequire]) {
-    try {
-      const addon = requireClipboard("@mariozechner/clipboard") as
-        | { getText?: () => Promise<string | null> }
-        | undefined;
-      if (addon && typeof addon.getText === "function") {
-        cachedNativeAddon = addon as NativeClipboardAddon;
-        break;
-      }
-    } catch {
-      // Try the next resolution root.
-    }
-  }
-  return cachedNativeAddon;
+/**
+ * Delegate loader: pi-tui's `getNativeClipboard()` (pi 0.87.1), the bundled
+ * native clipboard helper the main session's `readClipboardText` uses too.
+ * It caches helper loading internally and resolves to undefined (never
+ * throws) when the platform/arch has no bundled helper — linux without
+ * `DISPLAY`, or non-x64/arm64 — in which case the channel reports
+ * `unavailable` and the fallback chain (PowerShell / pbpaste → OSC 52)
+ * takes over.
+ */
+function loadNativeClipboard(): NativeClipboard | undefined {
+  return getNativeClipboard();
 }
 
 export interface NativeChannelOptions {
-  /** Native addon loader override (tests). Defaults to {@link loadNativeAddon}. */
-  loadNative?: () => NativeClipboardAddon | null;
+  /** Native clipboard loader override (tests). Defaults to {@link loadNativeClipboard}. */
+  loadNative?: () => NativeClipboardReader | undefined;
 }
 
 /**
- * Native channel: read plain text via the `@mariozechner/clipboard` addon.
- * A missing/unloadable addon reports `unavailable`; a loaded addon that sees
- * no text reports `empty` (definitive, stops the cascade).
+ * Native channel: read plain text through pi-tui's `getNativeClipboard()`.
+ * A missing/unloadable helper reports `unavailable`; a loaded helper that
+ * sees no text reports `empty` (definitive, stops the cascade).
+ *
+ * The `NativeClipboard.getText` tri-state drives the outcome contract:
+ * `undefined` = helper loaded but no clipboard backend (unavailable),
+ * `null` = no text held (empty); transfer failures reject and map to
+ * unavailable.
  */
 export function makeNativeChannel(
   options: NativeChannelOptions = {},
 ): ClipboardReadChannel {
-  const load = options.loadNative ?? loadNativeAddon;
+  const load = options.loadNative ?? loadNativeClipboard;
   return {
     name: "native",
     async read() {
-      let addon: NativeClipboardAddon | null;
+      let clipboard: NativeClipboardReader | undefined;
       try {
-        addon = load();
+        clipboard = load();
       } catch {
-        addon = null;
+        clipboard = undefined;
       }
-      if (!addon) return { ok: false, reason: "unavailable" };
+      if (!clipboard) return { ok: false, reason: "unavailable" };
       try {
-        const text = await addon.getText();
+        const text = await clipboard.getText();
+        if (text === undefined) return { ok: false, reason: "unavailable" };
         return text && text.length > 0
           ? { ok: true, text }
           : { ok: false, reason: "empty" };
@@ -385,14 +369,16 @@ export interface PlatformChannelsOptions {
   exec?: ExecFn;
   write?: (sequence: string) => void;
   readReply?: (timeoutMs: number) => Promise<string | null>;
-  /** Native addon loader override (tests). Defaults to the real loader. */
-  loadNative?: () => NativeClipboardAddon | null;
+  /** Native clipboard loader override (tests). Defaults to the real loader. */
+  loadNative?: () => NativeClipboardReader | undefined;
 }
 /**
  * The per-platform channel matrix (primary first, then fallbacks). win32 /
- * darwin lead with the native addon, fall back to their platform tool, then
- * to an OSC 52 query; linux (and unknown platforms) query OSC 52 directly —
- * mirroring the write-side cascade where OSC 52 is the universal last resort.
+ * darwin lead with the native helper, fall back to their platform tool, then
+ * to an OSC 52 query; linux leads with the native helper when an X11 display
+ * is available (`getNativeClipboard()` gates on `DISPLAY`) and queries OSC 52
+ * otherwise; unknown platforms query OSC 52 directly — mirroring the
+ * write-side cascade where OSC 52 is the universal last resort.
  */
 export function buildPlatformChannels(
   options: PlatformChannelsOptions = {},
@@ -415,7 +401,7 @@ export function buildPlatformChannels(
         osc52,
       ];
     case "linux":
-      return [osc52];
+      return [makeNativeChannel({ loadNative: options.loadNative }), osc52];
     default:
       return [osc52];
   }

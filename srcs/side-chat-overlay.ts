@@ -4,7 +4,6 @@ import {
   type ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import type { Model } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
 import {
   buildSessionContext,
   convertToLlm,
@@ -577,15 +576,20 @@ export class SideChatOverlay implements Component, Focusable {
     // turn loop — retry backoff, lane enforcement, Esc cancellation — and
     // reports TurnPhase events the overlay renders. The overlay only
     // assembles the deps: agent options (initial state: fork surgery +
-    // framing block + read-only tool list, streamFn wrapped with pi's
-    // provider-layer retry settings — spec #20 D5: NOT gated by
-    // features.retry / retry.enabled, mirroring the main session), the
+    // framing block + read-only tool list, streamFn = the model registry's
+    // streamSimple — auth resolves inside the runtime at request time
+    // (apiKey/OAuth/baseUrl, pi 0.87.1 parity; no hand-wired getApiKey) —
+    // wrapped with pi's provider-layer retry settings — spec #20 D5: NOT
+    // gated by features.retry / retry.enabled, mirroring the main session),
     // features-ANDed retry policy (D11), the prompt pack, the live lane
     // closures, and the phase sink.
     // `runnerFactory` is a test-only seam (default: one-line passthrough).
     const runnerOptions: ForkTurnRunnerOptions = {
       agentOptions: {
-        streamFn: injectProviderRetry(streamSimple, options.retryPolicy.provider),
+        streamFn: injectProviderRetry(
+          modelRegistry.streamSimple.bind(modelRegistry),
+          options.retryPolicy.provider,
+        ),
         initialState: {
           // Shared-prefix layout (#9): the MAIN persona stays in the system
           // slot so the request head matches the main lane token-for-token.
@@ -596,11 +600,6 @@ export class SideChatOverlay implements Component, Focusable {
           messages: [...forkedMessages, framingMessage],
         },
         convertToLlm,
-        getApiKey: async (provider) => {
-          const key = await modelRegistry.getApiKeyForProvider(provider);
-          if (!key) throw new Error("No API key available");
-          return key;
-        },
       },
       // D11: the extension feature switch ANDs with pi's own
       // `settings.retry.enabled` — either one off means a single attempt

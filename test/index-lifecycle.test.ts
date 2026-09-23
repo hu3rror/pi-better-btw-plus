@@ -94,7 +94,7 @@ describe("DEBUG bug1: /btw restore after Alt+W hide", () => {
       cwd: process.cwd(),
       getSystemPrompt: () => "",
       sessionManager: { getEntries: () => [], getLeafId: () => null },
-      modelRegistry: { getApiKeyForProvider: async () => "key" },
+      modelRegistry: { streamSimple: async () => {} },
       scopedModels: [],
       ui,
     };

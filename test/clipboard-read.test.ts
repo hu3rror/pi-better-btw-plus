@@ -22,7 +22,7 @@ import {
   type ClipboardReadChannel,
   type ClipboardReadOutcome,
   type ExecFn,
-  type NativeClipboardAddon,
+  type NativeClipboardReader,
 } from "../srcs/clipboard-read.ts";
 
 const ok = (text: string): ClipboardReadOutcome => ({ ok: true, text });
@@ -187,34 +187,43 @@ describe("channel factories", () => {
     }
   });
 
-  test("native channel reads via the addon's getText", async () => {
-    const addon: NativeClipboardAddon = { getText: async () => "native text" };
+  test("native channel reads via the helper's getText", async () => {
+    const helper: NativeClipboardReader = { getText: async () => "native text" };
     await expect(
-      makeNativeChannel({ loadNative: () => addon }).read(),
+      makeNativeChannel({ loadNative: () => helper }).read(),
     ).resolves.toEqual(ok("native text"));
   });
 
-  test("native channel reports empty when the addon sees no text", async () => {
+  test("native channel reports empty when the helper sees no text", async () => {
     for (const value of [null, ""]) {
-      const addon: NativeClipboardAddon = { getText: async () => value };
+      const helper: NativeClipboardReader = { getText: async () => value };
       await expect(
-        makeNativeChannel({ loadNative: () => addon }).read(),
+        makeNativeChannel({ loadNative: () => helper }).read(),
       ).resolves.toEqual(empty);
     }
   });
 
-  test("native channel reports unavailable when the addon is missing / throws", async () => {
-    await expect(makeNativeChannel({ loadNative: () => null }).read()).resolves.toEqual(
-      unavailable,
-    );
-    const boom: NativeClipboardAddon = {
+  test("native channel reports unavailable when getText returns undefined (no backend)", async () => {
+    // pi-tui's NativeClipboard tri-state: undefined = helper loaded but no
+    // clipboard backend (e.g. linux without DISPLAY).
+    const helper: NativeClipboardReader = { getText: async () => undefined };
+    await expect(
+      makeNativeChannel({ loadNative: () => helper }).read(),
+    ).resolves.toEqual(unavailable);
+  });
+
+  test("native channel reports unavailable when the helper is missing / throws", async () => {
+    await expect(
+      makeNativeChannel({ loadNative: () => undefined }).read(),
+    ).resolves.toEqual(unavailable);
+    const boom: NativeClipboardReader = {
       getText: async () => {
-        throw new Error("addon exploded");
+        throw new Error("helper exploded");
       },
     };
-    await expect(makeNativeChannel({ loadNative: () => boom }).read()).resolves.toEqual(
-      unavailable,
-    );
+    await expect(
+      makeNativeChannel({ loadNative: () => boom }).read(),
+    ).resolves.toEqual(unavailable);
   });
 });
 
@@ -255,7 +264,7 @@ describe("platform channel matrix", () => {
     const names = buildPlatformChannels({
       platform: "win32",
       exec: execFail,
-      loadNative: () => null,
+      loadNative: () => undefined,
     }).map((c) => c.name);
     expect(names).toEqual(["native", "powershell", "osc52"]);
   });
@@ -264,14 +273,14 @@ describe("platform channel matrix", () => {
     const names = buildPlatformChannels({
       platform: "darwin",
       exec: execFail,
-      loadNative: () => null,
+      loadNative: () => undefined,
     }).map((c) => c.name);
     expect(names).toEqual(["native", "pbpaste", "osc52"]);
   });
 
-  test("linux: OSC 52 only", () => {
+  test("linux: native helper primary (when present), OSC 52 last", () => {
     const names = buildPlatformChannels({ platform: "linux" }).map((c) => c.name);
-    expect(names).toEqual(["osc52"]);
+    expect(names).toEqual(["native", "osc52"]);
   });
 
   test("unknown platform: OSC 52 only", () => {
@@ -286,7 +295,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk("from powershell\r\n"),
-      loadNative: () => null, // native addon unavailable — PowerShell path
+      loadNative: () => undefined, // native helper unavailable — PowerShell path
       write: (s) => written.push(s),
       readReply: async () => null,
     });
@@ -299,7 +308,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk(""),
-      loadNative: () => null, // native addon unavailable — PowerShell path
+      loadNative: () => undefined, // native helper unavailable — PowerShell path
       write: (s) => written.push(s),
       readReply: async () => null,
     });
@@ -312,7 +321,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execFail,
-      loadNative: () => null, // native addon unavailable — PowerShell path
+      loadNative: () => undefined, // native helper unavailable — PowerShell path
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("from osc52"),
     });
@@ -325,7 +334,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "darwin",
       exec: execFail,
-      loadNative: () => null, // native addon unavailable — pbpaste path
+      loadNative: () => undefined, // native helper unavailable — pbpaste path
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("mac fallback"),
     });
@@ -333,10 +342,11 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     expect(written).toEqual([OSC52_QUERY]);
   });
 
-  test("linux: OSC 52 success", async () => {
+  test("linux: native unavailable (no DISPLAY) falls back to OSC 52", async () => {
     const written: string[] = [];
     const outcome = await readClipboardTextFromSystem({
       platform: "linux",
+      loadNative: () => undefined, // getNativeClipboard(): no DISPLAY
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("linux clipboard"),
     });
@@ -344,7 +354,19 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     expect(written).toEqual([OSC52_QUERY]);
   });
 
-  test("win32: native addon success short-circuits (no subprocess, no OSC 52)", async () => {
+  test("linux: native X11 success short-circuits the OSC 52 query", async () => {
+    const written: string[] = [];
+    const outcome = await readClipboardTextFromSystem({
+      platform: "linux",
+      loadNative: () => ({ getText: async () => "x11 native" }),
+      write: (s) => written.push(s),
+      readReply: async () => null,
+    });
+    expect(outcome).toEqual(ok("x11 native"));
+    expect(written).toEqual([]); // native succeeded — no OSC 52 query
+  });
+
+  test("win32: native helper success short-circuits (no subprocess, no OSC 52)", async () => {
     const written: string[] = [];
     let execCalls = 0;
     const outcome = await readClipboardTextFromSystem({
@@ -355,9 +377,9 @@ describe("readClipboardTextFromSystem end-to-end", () => {
       },
       write: (s) => written.push(s),
       readReply: async () => null,
-      loadNative: () => ({ getText: async () => "from native addon" }),
+      loadNative: () => ({ getText: async () => "from native helper" }),
     });
-    expect(outcome).toEqual(ok("from native addon"));
+    expect(outcome).toEqual(ok("from native helper"));
     expect(execCalls).toBe(0); // PowerShell never spawned
     expect(written).toEqual([]); // no OSC 52 query
   });
@@ -387,7 +409,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
       exec: execFail,
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("deep fallback"),
-      loadNative: () => null,
+      loadNative: () => undefined,
     });
     expect(outcome).toEqual(ok("deep fallback"));
     expect(written).toEqual([OSC52_QUERY]);
@@ -398,7 +420,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
       readClipboardTextFromSystem({
         platform: "win32",
         exec: () => { throw new Error("powershell missing"); },
-        loadNative: () => null, // native addon unavailable too
+        loadNative: () => undefined, // native helper unavailable too
         write: () => {},
         readReply: async () => null,
       }),
