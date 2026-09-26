@@ -53,6 +53,7 @@ export function makeOverlay(
     },
     tracker: { writeCount: 0 },
     modelRegistry: { streamSimple: async () => {} },
+    scopedModels: [],
     sessionManager: { getEntries: () => [], getLeafId: () => null },
     promptPack: {
       framing: "",

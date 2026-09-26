@@ -57,8 +57,11 @@ The side chat owns the terminal's mouse while open, so the input editor gets rea
 
 ## Keybindings
 
+The overlay's bottom hint bar shows only the essentials; press `Ctrl+O` to open the keymap screen with the full keymap, grouped by function (navigation / conversation / copy & paste / mode & model / scrolling / mouse).
+
 | Key | Action |
 | --- | --- |
+| `Ctrl+O` | Open the keymap screen (full keymap modal) |
 | `Alt+W` | Open (closed) / background (visible) / restore (hidden) |
 | `Enter` | Send |
 | `Esc` | Interrupt streaming or cancel a retry backoff; close when idle |

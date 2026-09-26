@@ -183,6 +183,20 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
     expect(fake.calls.map((c) => c.kind)).toEqual(["prompt"]);
   });
 
+  test("the compact bar swaps to Esc stop while a turn is running", async () => {
+    const { overlay, fake } = makeSmokeHarness([{ kind: "succeed" }]);
+    fake.holdNext(); // attempt 1 stays in flight so the runner is running
+
+    overlay.handleInput("hi");
+    overlay.handleInput("\r");
+    await tick();
+
+    expect(frameText(overlay)).toContain("Esc stop");
+
+    fake.releaseHeld();
+    await tick();
+  });
+
   test("a mid-turn lane violation renders the blocked status", async () => {
     const { overlay, fake } = makeSmokeHarness([{ kind: "succeed" }]);
     fake.holdNext(); // attempt 1 stays in flight so the turn cannot settle

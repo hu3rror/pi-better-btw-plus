@@ -68,7 +68,13 @@ import {
   modelKey,
   type ModelChoice,
 } from "./model-switch.ts";
-import { KEYBINDINGS, matchesAnyKey, matchesKeybinding } from "./shortcuts.ts";
+import {
+  KEYBINDINGS,
+  bindingText,
+  matchesAnyKey,
+  matchesKeybinding,
+  type Keybinding,
+} from "./shortcuts.ts";
 import { wrapToolsWithOverlapDetection } from "./tool-wrapper.ts";
 import type { SideChatFeatures } from "./config.ts";
 import type { RetryPolicy } from "./retry.ts";
@@ -189,6 +195,8 @@ export class SideChatOverlay implements Component, Focusable {
   private modelPicker: SelectList | null = null;
   /** Choices backing the open picker (index-aligned with its SelectItems). */
   private modelPickerChoices: ModelChoice[] = [];
+  /** Keymap screen modal open flag (issue #35): Ctrl+O opens, Esc closes. */
+  private keymapOpen = false;
 
   /** Chat area height (message lines): delegates to the shared layout module. */
   private computeChatHeight(): number {
@@ -920,33 +928,28 @@ export class SideChatOverlay implements Component, Focusable {
     const stream = this.runner.isRunning ? theme.fg("warning", " ●") : "";
     const left = theme.fg("accent", title) + stream;
 
-    const escHint = this.runner.isRunning ? "Esc stop" : "Esc close";
-    const modeHint =
-      this.toolMode === "read-only"
-        ? `${KEYBINDINGS.toggleMode.hint} Edit`
-        : `${KEYBINDINGS.toggleMode.hint} Readonly`;
-    const scrolled = !this.messages.isAtBottom();
-    const scrollHint = scrolled
-      ? theme.fg(
-          "warning",
-          `↑${this.messages.getScrollOffset()} · PgDn/Wheel ↓`,
-        )
-      : "Pg/Scr ↑↓";
+    const escLabel = this.runner.isRunning ? "stop" : "close";
     // Fixed two-row key-hint bar: the rows never collapse onto one line on
     // wide terminals, so the layout (and the message-area height) is stable
     // everywhere. Rows longer than the frame are truncated with "…" by
     // renderSideChatFrame; one message row is traded for the second hint row.
-    const hintLines = this.modelPicker
-      ? buildSideChatModelPickerHints()
-      : buildSideChatHintLines({ scrollHint, escHint, modeHint, features: this.options.features });
+    // Modals swap both the message area and the hint rows, keeping the count
+    // at two so the frame geometry never changes (mouse hit-testing).
+    const hintLines = this.keymapOpen
+      ? buildSideChatKeymapHints(theme)
+      : this.modelPicker
+        ? buildSideChatModelPickerHints(theme)
+        : buildSideChatHintLines({ escLabel, theme });
     const maxLines = Math.max(
       3,
       this.computeChatHeight() - (hintLines.length - 1),
     );
     this.messages.setMaxVisibleLines(maxLines);
-    const msgLines = this.modelPicker
-      ? this.renderModelPicker(innerWidth, maxLines)
-      : this.messages.render(innerWidth);
+    const msgLines = this.keymapOpen
+      ? this.renderKeymapScreen(innerWidth, maxLines)
+      : this.modelPicker
+        ? this.renderModelPicker(innerWidth, maxLines)
+        : this.messages.render(innerWidth);
     for (let i = msgLines.length; i < maxLines; i++) msgLines.push("");
 
     const editorLines = this.editor.render(innerWidth);
@@ -981,7 +984,21 @@ export class SideChatOverlay implements Component, Focusable {
     // Backgrounding (Alt+W) while the picker is open cancels the modal first.
     if (matchesAnyKey(data, KEYBINDINGS.background.keys)) {
       this.closeModelPicker();
+      this.closeKeymapScreen();
       this.options.onBackground();
+      return;
+    }
+    // Ctrl+O opens the keymap screen from every state — including on top of
+    // the picker — so the check runs before the picker gate below.
+    if (matchesAnyKey(data, KEYBINDINGS.keymapScreen.keys)) {
+      this.openKeymapScreen();
+      return;
+    }
+    // Open keymap screen: route everything to the screen (Esc closes; the
+    // picker underneath stays set, so Esc returns to it) until it closes.
+    // The gate sits BEFORE the picker gate so keymap-over-picker works.
+    if (this.keymapOpen) {
+      if (matchesKey(data, Key.escape)) this.closeKeymapScreen();
       return;
     }
     // Open modal picker: route everything to the list (↑/↓ move, Enter
@@ -1200,6 +1217,39 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
   /**
+   * Ctrl+O: open the keymap screen as a modal inside the overlay (issue #35).
+   * Read-only help — unlike the model picker it opens even while streaming.
+   * A no-op while a modal is already open (Ctrl+O is consumed by the gate).
+   */
+  private openKeymapScreen(): void {
+    if (this.keymapOpen) return;
+    this.gesture.cancel();
+    this.editorSelection.clear();
+    this.keymapOpen = true;
+    this.options.tui.requestRender();
+  }
+
+  private closeKeymapScreen(): void {
+    if (!this.keymapOpen) return;
+    this.keymapOpen = false;
+    this.options.tui.requestRender();
+  }
+
+  /**
+   * Render the open keymap screen inside the frame: the grouped full keymap,
+   * padded/truncated to exactly `maxLines` so the frame geometry stays stable
+   * (mouse hit-testing and the hint bar depend on it).
+   */
+  private renderKeymapScreen(width: number, maxLines: number): string[] {
+    const lines = buildKeymapScreenLines({
+      features: this.options.features,
+      theme: this.options.theme,
+    });
+    while (lines.length < maxLines) lines.push("");
+    return lines.slice(0, maxLines);
+  }
+
+  /**
    * Render the open picker inside the frame: a one-line title + the list
    * rows, padded/truncated to exactly `maxLines` so the frame geometry stays
    * stable (mouse hit-testing and the hint bar depend on it).
@@ -1312,10 +1362,11 @@ export function renderSideChatFrame(opts: SideChatFrameOptions): string[] {
   for (const line of opts.editorLines)
     lines.push(frameLine(theme, borderColor, line, innerWidth));
   lines.push(theme.fg(borderColor, "├" + "─".repeat(width - 2) + "┤"));
+  // Hint lines arrive already styled (keys dim, labels muted — pi keyHint
+  // grammar) by the hint builders, so the frame wraps them without an extra
+  // color pass.
   for (const line of opts.hints)
-    lines.push(
-      frameLine(theme, borderColor, theme.fg("dim", line), innerWidth),
-    );
+    lines.push(frameLine(theme, borderColor, line, innerWidth));
   lines.push(theme.fg(borderColor, "└" + "─".repeat(width - 2) + "┘"));
 
   return lines.map((l) =>
@@ -1336,46 +1387,166 @@ function frameLine(
   );
 }
 
-/** Alt-actions hint row base; the model entry is appended only when the switch is on. */
-const ALT_ACTIONS_BASE = [
-  KEYBINDINGS.background.hint,
-  KEYBINDINGS.refork.hint,
-  KEYBINDINGS.clear.hint,
-  KEYBINDINGS.export.hint,
-].join(" · ");
-const ALT_ACTION_HINTS = `${ALT_ACTIONS_BASE} · ${KEYBINDINGS.modelPicker.hint}`;
 /**
- * Build the fixed two-row key-hint bar. Row 1: scrolling, copy, mode toggle,
- * Esc and send; row 2: the Alt-actions (Alt abbreviated as A, A+w = Alt+W).
- * Always two rows — the rows are truncated on narrow terminals rather than
- * collapsing to one line, keeping the message-area height stable.
+ * One styled segment of a hint line: text + the theme color carrying it.
+ * Keys render dim and labels muted (pi's own keyHint grammar), so the
+ * overlay's hint rows read like the host UI's.
+ */
+type HintSegment = readonly [string, ThemeColor];
+
+const HINT_SEP: HintSegment = [" · ", "muted"];
+
+/** Join entries with the ` · ` separator into one styled hint line. */
+function joinHintSegments(
+  entries: ReadonlyArray<ReadonlyArray<HintSegment>>,
+): HintSegment[] {
+  const out: HintSegment[] = [];
+  for (const [i, entry] of entries.entries()) {
+    if (i > 0) out.push(HINT_SEP);
+    out.push(...entry);
+  }
+  return out;
+}
+
+/** Styled key+label entry for a binding (compact first key / full all keys). */
+function bindingSegments(kb: Keybinding, full: boolean): HintSegment[] {
+  const { keyText, label } = bindingText(kb, full);
+  return [[keyText, "dim"], [` ${label}`, "muted"]];
+}
+
+/** Styled literal entry: key dim + label muted, e.g. `Enter send`. */
+function literalSegments(key: string, label: string): HintSegment[] {
+  return [[key, "dim"], [` ${label}`, "muted"]];
+}
+
+/** Render one hint line from styled segments. */
+function renderHintLine(
+  theme: Theme,
+  segments: ReadonlyArray<HintSegment>,
+): string {
+  return segments.map(([text, color]) => theme.fg(color, text)).join("");
+}
+
+/** One keymap screen section: accent title + ` · `-joined entries. */
+function sectionLine(
+  theme: Theme,
+  title: string,
+  entries: ReadonlyArray<ReadonlyArray<HintSegment>>,
+): string {
+  return renderHintLine(theme, [
+    [title, "accent"],
+    [" ", "muted"],
+    ...joinHintSegments(entries),
+  ]);
+}
+
+/**
+ * Build the fixed two-row compact key-hint bar (issue #35). Row 1: the
+ * essentials (send, close, mode toggle, paste, copy); row 2: background and
+ * the keymap opener. Full-word modifiers (`Alt+T mode`, not `A+t`) mirror
+ * pi's own keyHint grammar; the Esc label swaps stop/close with the run
+ * state. Always two rows — the rows are truncated on narrow terminals
+ * rather than collapsing to one line, keeping the message-area height
+ * stable.
  */
 export function buildSideChatHintLines(options: {
-  scrollHint: string;
-  escHint: string;
-  modeHint: string;
-  /** Feature switches (D11): a disabled behavior is not advertised in the hints. */
-  features: SideChatFeatures;
+  escLabel: string;
+  theme: Theme;
 }): string[] {
-  const { scrollHint, escHint, modeHint, features } = options;
-  // Right-click semantics live next to the copy hint: chat-area right-click
-  // copies a retained selection, editor right-click pastes (D10).
-  const rightClickHint = features.rightClickCopyPaste
-    ? " · R-click copy/paste"
-    : "";
-  const primary = `${scrollHint} · ${KEYBINDINGS.copySelection.hint} · ${KEYBINDINGS.copyLastMessage.hint} · ${KEYBINDINGS.copyInput.hint} · ${KEYBINDINGS.paste.hint}${rightClickHint} · ${modeHint} · ${escHint} · Enter send`;
-  const secondary = `${ALT_ACTIONS_BASE}${features.modelSwitch ? ` · ${KEYBINDINGS.modelPicker.hint}` : ""}`;
+  const { escLabel, theme } = options;
+  const primary = renderHintLine(
+    theme,
+    joinHintSegments([
+      literalSegments("Enter", "send"),
+      literalSegments("Esc", escLabel),
+      bindingSegments(KEYBINDINGS.toggleMode, false),
+      bindingSegments(KEYBINDINGS.paste, false),
+      bindingSegments(KEYBINDINGS.copySelection, false),
+    ]),
+  );
+  const secondary = renderHintLine(
+    theme,
+    joinHintSegments([
+      bindingSegments(KEYBINDINGS.background, false),
+      bindingSegments(KEYBINDINGS.keymapScreen, false),
+    ]),
+  );
   return [primary, secondary];
 }
 
 /**
  * Hint bar while the Ctrl+L model picker modal is open: row 1 switches to
- * the picker keys, row 2 keeps the Alt-actions (still two rows, so the
+ * the picker keys, row 2 points at the keymap screen (still two rows, so the
  * message-area height stays stable).
  */
-export function buildSideChatModelPickerHints(): string[] {
+export function buildSideChatModelPickerHints(theme: Theme): string[] {
   return [
-    "↑/↓ select · Enter confirm · Esc cancel",
-    ALT_ACTION_HINTS,
+    renderHintLine(
+      theme,
+      joinHintSegments([
+        literalSegments("↑/↓", "select"),
+        literalSegments("Enter", "confirm"),
+        literalSegments("Esc", "cancel"),
+      ]),
+    ),
+    renderHintLine(theme, bindingSegments(KEYBINDINGS.keymapScreen, false)),
+  ];
+}
+
+/**
+ * Hint bar while the keymap screen is open: Esc closes the modal (row 2
+ * stays blank — still two rows, so the frame geometry never changes).
+ */
+export function buildSideChatKeymapHints(theme: Theme): string[] {
+  return [renderHintLine(theme, literalSegments("Esc", "close")), ""];
+}
+
+/**
+ * The keymap screen's grouped full keymap (issue #35). Every action stays
+ * documented here — the compact bar only advertises the essentials. Feature
+ * switches (D11): a disabled behavior is not advertised.
+ */
+export function buildKeymapScreenLines(options: {
+  features: SideChatFeatures;
+  theme: Theme;
+}): string[] {
+  const { features, theme } = options;
+  const entry = (kb: Keybinding): HintSegment[] => bindingSegments(kb, true);
+  const mouseEntry = (text: string): HintSegment[] => [[text, "muted"]];
+  const mouseEntries: HintSegment[][] = [
+    mouseEntry("drag select"),
+    mouseEntry("double/triple-click"),
+    ...(features.rightClickCopyPaste
+      ? [mouseEntry("right-click copy/paste")]
+      : []),
+  ];
+  return [
+    renderHintLine(theme, [["Keymap", "accent"]]),
+    sectionLine(theme, "Navigation:", [
+      entry(KEYBINDINGS.background),
+      literalSegments("Esc", "close"),
+    ]),
+    sectionLine(theme, "Conversation:", [
+      literalSegments("Enter", "send"),
+      entry(KEYBINDINGS.refork),
+      entry(KEYBINDINGS.clear),
+      entry(KEYBINDINGS.export),
+    ]),
+    sectionLine(theme, "Copy & Paste:", [
+      entry(KEYBINDINGS.copySelection),
+      entry(KEYBINDINGS.copyLastMessage),
+      entry(KEYBINDINGS.copyInput),
+      entry(KEYBINDINGS.paste),
+    ]),
+    sectionLine(theme, "Mode & Model:", [
+      entry(KEYBINDINGS.toggleMode),
+      ...(features.modelSwitch ? [entry(KEYBINDINGS.modelPicker)] : []),
+    ]),
+    sectionLine(theme, "Scrolling:", [
+      literalSegments("PageUp/PageDown", "page"),
+      literalSegments("Shift+↑/↓", "few lines"),
+      literalSegments("Wheel", "scroll"),
+    ]),
+    sectionLine(theme, "Mouse:", mouseEntries),
   ];
 }

@@ -131,8 +131,25 @@ editor's line-start binding.
 
 **Overlay layout**:
 The arrangement of the overlay's on-screen regions (title bar, message area,
-input editor, hint bar). A single layout spec (`srcs/overlay-layout.ts` — the
+input editor, hint bar; modals: model picker, keymap screen). A single layout
+spec (`srcs/overlay-layout.ts` — the
 `LAYOUT` options object plus pure geometry functions) from which both rendering
 and mouse hit-testing derive, so they can never drift apart.
 Note: the geometry mirrors pi-tui's private `resolveOverlayLayout`; if pi ever
 exposes that resolver, swap the mirror for a call (see docs/adr/0004).
+
+**Hint bar**:
+The fixed two-row key-hint region at the bottom of the overlay — the compact
+bar: row 1 shows the essentials (send, close, mode toggle, paste, copy), row 2
+shows background and the keymap opener. Reports actions only — mode state and
+scroll offset live in the header. Every label derives from the single
+keybinding registry (`srcs/shortcuts.ts`), so a rebind updates matching and
+display together.
+_Avoid_: calling it a "menu" — it is passive display, not an interactive menu.
+
+**Keymap screen** (键位表屏):
+The modal opened with `Ctrl+O` (pi `app.tools.expand` key) inside the overlay:
+the full keymap grouped by function, feature-gated like the hint bar. Like the
+model picker, it swaps the message area and hint rows while open, so the frame
+geometry never changes; `Esc` closes it.
+_Avoid_: "help screen" — it lists keys, it does not host help content.
