@@ -78,18 +78,19 @@ export function formatKeyText(keys: readonly KeyId[]): string {
 }
 
 /**
- * Display pieces of a binding. `full` uses all keys + the longer description
- * (keymap screen); compact mode uses the first key + the short label (hint
- * bar). Kept separate from rendering so the overlay can style keys dim and
- * labels muted (pi keyHint grammar) while shortcuts.ts stays the source.
+ * Display pieces of a binding. `longForm` uses all keys + the longer
+ * description (keymap screen); compact mode uses the first key + the short
+ * label (hint bar). Kept separate from rendering so the overlay can style
+ * keys dim and labels muted (pi keyHint grammar) while shortcuts.ts stays
+ * the source.
  */
 export function bindingText(
   kb: Keybinding,
-  full = false,
+  longForm = false,
 ): { keyText: string; label: string } {
   return {
-    keyText: formatKeyText(full ? kb.keys : kb.keys.slice(0, 1)),
-    label: full ? (kb.description ?? kb.label) : kb.label,
+    keyText: formatKeyText(longForm ? kb.keys : kb.keys.slice(0, 1)),
+    label: longForm ? (kb.description ?? kb.label) : kb.label,
   };
 }
 

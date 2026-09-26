@@ -113,7 +113,8 @@ describe("keymap screen (Ctrl+O modal)", () => {
     expect(frame).toContain("Alt+T toggle edit/read-only");
     expect(frame).toContain("PageUp/PageDown");
     expect(frame).toContain("Shift+↑/↓");
-    expect(frame).toContain("right-click copy/paste");
+    expect(frame).toContain("right-click copy (chat)");
+    expect(frame).toContain("right-click paste (editor)");
   });
 
   test("Esc closes the keymap screen and restores the compact bar", () => {

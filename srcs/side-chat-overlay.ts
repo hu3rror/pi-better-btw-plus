@@ -1409,8 +1409,8 @@ function joinHintSegments(
 }
 
 /** Styled key+label entry for a binding (compact first key / full all keys). */
-function bindingSegments(kb: Keybinding, full: boolean): HintSegment[] {
-  const { keyText, label } = bindingText(kb, full);
+function bindingSegments(kb: Keybinding, longForm: boolean): HintSegment[] {
+  const { keyText, label } = bindingText(kb, longForm);
   return [[keyText, "dim"], [` ${label}`, "muted"]];
 }
 
@@ -1517,7 +1517,10 @@ export function buildKeymapScreenLines(options: {
     mouseEntry("drag select"),
     mouseEntry("double/triple-click"),
     ...(features.rightClickCopyPaste
-      ? [mouseEntry("right-click copy/paste")]
+      ? [
+          mouseEntry("right-click copy (chat)"),
+          mouseEntry("right-click paste (editor)"),
+        ]
       : []),
   ];
   return [
