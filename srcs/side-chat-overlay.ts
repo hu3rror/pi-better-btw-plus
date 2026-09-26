@@ -1246,8 +1246,7 @@ export class SideChatOverlay implements Component, Focusable {
       theme: this.options.theme,
       width,
     });
-    while (lines.length < maxLines) lines.push("");
-    return lines.slice(0, maxLines);
+    return padToLines(lines, maxLines);
   }
 
   /**
@@ -1262,8 +1261,7 @@ export class SideChatOverlay implements Component, Focusable {
       this.options.theme.fg("accent", "Select model (↑/↓ · Enter · Esc)"),
     ];
     lines.push(...list.render(width));
-    while (lines.length < maxLines) lines.push("");
-    return lines.slice(0, maxLines);
+    return padToLines(lines, maxLines);
   }
 
   /**
@@ -1388,6 +1386,12 @@ function frameLine(
   );
 }
 
+/** Pad/truncate rendered modal content to exactly `maxLines` (stable frame geometry). */
+function padToLines(lines: string[], maxLines: number): string[] {
+  while (lines.length < maxLines) lines.push("");
+  return lines.slice(0, maxLines);
+}
+
 /**
  * One styled segment of a hint line: text + the theme color carrying it.
  * Keys render dim and labels muted (pi's own keyHint grammar), so the
@@ -1494,11 +1498,11 @@ export function buildSideChatKeymapHints(theme: Theme): string[] {
  * documented here — the compact bar only advertises the essentials. Feature
  * switches (D11): a disabled behavior is not advertised.
  *
- * Visual hierarchy: an accent title with a full-width muted rule beneath it
- * (same separator grammar as the frame's ├─┤ rows), then one line per
- * section whose accent header is padded to a shared left column — the aligned
- * headers give the screen scanable section anchors without eating the
- * message-area height budget.
+ * Visual hierarchy: an accent title with a trailing muted rule on the same
+ * line (so it reads as a heading without eating a message-area line), then
+ * one line per section whose accent header is padded to a shared left column
+ * — the aligned headers give the screen scanable section anchors within the
+ * height budget.
  */
 export function buildKeymapScreenLines(options: {
   features: SideChatFeatures;
@@ -1534,8 +1538,11 @@ export function buildKeymapScreenLines(options: {
       ...joinHintSegments(entries),
     ]);
   return [
-    renderHintLine(theme, [["Keymap", "accent"]]),
-    theme.fg("muted", "─".repeat(width)),
+    renderHintLine(theme, [
+      ["Keymap", "accent"],
+      [" ", "muted"],
+      ["─".repeat(Math.max(0, width - "Keymap".length - 1)), "muted"],
+    ]),
     section("Navigation:", [
       entry(KEYBINDINGS.background),
       literalSegments("Esc", "close"),

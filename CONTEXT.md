@@ -142,9 +142,10 @@ exposes that resolver, swap the mirror for a call (see docs/adr/0004).
 The fixed two-row key-hint region at the bottom of the overlay — the compact
 bar: row 1 shows the essentials (send, close, mode toggle, paste, copy), row 2
 shows background and the keymap opener. Reports actions only — mode state and
-scroll offset live in the header. Every label derives from the single
-keybinding registry (`srcs/shortcuts.ts`), so a rebind updates matching and
-display together.
+scroll offset live in the header. Every fork-owned keybinding's label derives
+from the single keybinding registry (`srcs/shortcuts.ts`), so a rebind updates
+matching and display together; Enter/Esc and the host's scroll/mouse keys stay
+literals.
 _Avoid_: calling it a "menu" — it is passive display, not an interactive menu.
 
 **Keymap screen** (键位表屏):

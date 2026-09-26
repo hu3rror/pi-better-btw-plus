@@ -7,6 +7,7 @@
  */
 import { describe, expect, mock, test } from "bun:test";
 import {
+  frameText,
   makeOverlay,
   OVERLAY_TEST_WIDTH,
 } from "./helpers/make-overlay.ts";
@@ -28,11 +29,6 @@ mock.module("@earendil-works/pi-coding-agent", () => ({
   }),
 }));
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
-
-/** Frame text of the overlay's current render (the mock theme emits no ANSI). */
-function frameText(overlay: { render(width: number): string[] }): string {
-  return overlay.render(OVERLAY_TEST_WIDTH).join("\n");
-}
 
 const CTRL_O = "\x0f"; // legacy Ctrl+O: SI (0x0F)
 const CTRL_L = "\x0c"; // legacy Ctrl+L: form feed (0x0C)

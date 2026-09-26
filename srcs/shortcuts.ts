@@ -48,7 +48,6 @@ export const KEYBINDINGS = {
   modelPicker: { keys: ["ctrl+l"], label: "model", description: "model picker" },
   /** Read-only / edit mode toggle (Ctrl+T freed for pi's thinking toggle). */
   toggleMode: { keys: ["alt+t"], label: "mode", description: "toggle edit/read-only" },
-  /** Copy the active mouse selection (pi `tui.input.copy` parity). */
   /**
    * Copy the active mouse selection (pi `tui.input.copy` parity). Without
    * one, bare Ctrl+C clears the input box (pi `app.clear` parity, spec #22);

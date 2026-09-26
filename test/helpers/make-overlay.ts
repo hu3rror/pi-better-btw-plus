@@ -14,6 +14,13 @@ import type { SideChatOverlay as SideChatOverlayType } from "../../srcs/side-cha
 /** Width the overlay would compute for 120 columns (floor(120*0.85) = 102). */
 export const OVERLAY_TEST_WIDTH = 102;
 
+/** Frame text of the overlay's current render (the mock theme emits no ANSI). */
+export function frameText(overlay: {
+  render(width: number): string[];
+}): string {
+  return overlay.render(OVERLAY_TEST_WIDTH).join("\n");
+}
+
 export const theme: any = { fg: (_name: string, text: string) => text };
 
 export const DEFAULT_MESSAGES: any[] = [
