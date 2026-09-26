@@ -1244,6 +1244,7 @@ export class SideChatOverlay implements Component, Focusable {
     const lines = buildKeymapScreenLines({
       features: this.options.features,
       theme: this.options.theme,
+      width,
     });
     while (lines.length < maxLines) lines.push("");
     return lines.slice(0, maxLines);
@@ -1427,19 +1428,6 @@ function renderHintLine(
   return segments.map(([text, color]) => theme.fg(color, text)).join("");
 }
 
-/** One keymap screen section: accent title + ` · `-joined entries. */
-function sectionLine(
-  theme: Theme,
-  title: string,
-  entries: ReadonlyArray<ReadonlyArray<HintSegment>>,
-): string {
-  return renderHintLine(theme, [
-    [title, "accent"],
-    [" ", "muted"],
-    ...joinHintSegments(entries),
-  ]);
-}
-
 /**
  * Build the fixed two-row compact key-hint bar (issue #35). Row 1: the
  * essentials (send, close, mode toggle, paste, copy); row 2: background and
@@ -1505,51 +1493,74 @@ export function buildSideChatKeymapHints(theme: Theme): string[] {
  * The keymap screen's grouped full keymap (issue #35). Every action stays
  * documented here — the compact bar only advertises the essentials. Feature
  * switches (D11): a disabled behavior is not advertised.
+ *
+ * Visual hierarchy: an accent title with a full-width muted rule beneath it
+ * (same separator grammar as the frame's ├─┤ rows), then one line per
+ * section whose accent header is padded to a shared left column — the aligned
+ * headers give the screen scanable section anchors without eating the
+ * message-area height budget.
  */
 export function buildKeymapScreenLines(options: {
   features: SideChatFeatures;
   theme: Theme;
+  width: number;
 }): string[] {
-  const { features, theme } = options;
+  const { features, theme, width } = options;
   const entry = (kb: Keybinding): HintSegment[] => bindingSegments(kb, true);
   const mouseEntry = (text: string): HintSegment[] => [[text, "muted"]];
   const mouseEntries: HintSegment[][] = [
     mouseEntry("drag select"),
     mouseEntry("double/triple-click"),
     ...(features.rightClickCopyPaste
-      ? [
-          mouseEntry("right-click copy (chat)"),
-          mouseEntry("right-click paste (editor)"),
-        ]
+      ? [mouseEntry("right-click: copy (chat) / paste (editor)")]
       : []),
   ];
+  const sectionTitles = [
+    "Navigation:",
+    "Conversation:",
+    "Copy & Paste:",
+    "Mode & Model:",
+    "Scrolling:",
+    "Mouse:",
+  ];
+  const headerWidth = Math.max(...sectionTitles.map((t) => t.length));
+  const section = (
+    title: string,
+    entries: ReadonlyArray<ReadonlyArray<HintSegment>>,
+  ): string =>
+    renderHintLine(theme, [
+      [title, "accent"],
+      [" ".repeat(headerWidth - title.length + 1), "muted"],
+      ...joinHintSegments(entries),
+    ]);
   return [
     renderHintLine(theme, [["Keymap", "accent"]]),
-    sectionLine(theme, "Navigation:", [
+    theme.fg("muted", "─".repeat(width)),
+    section("Navigation:", [
       entry(KEYBINDINGS.background),
       literalSegments("Esc", "close"),
     ]),
-    sectionLine(theme, "Conversation:", [
+    section("Conversation:", [
       literalSegments("Enter", "send"),
       entry(KEYBINDINGS.refork),
       entry(KEYBINDINGS.clear),
       entry(KEYBINDINGS.export),
     ]),
-    sectionLine(theme, "Copy & Paste:", [
+    section("Copy & Paste:", [
       entry(KEYBINDINGS.copySelection),
       entry(KEYBINDINGS.copyLastMessage),
       entry(KEYBINDINGS.copyInput),
       entry(KEYBINDINGS.paste),
     ]),
-    sectionLine(theme, "Mode & Model:", [
+    section("Mode & Model:", [
       entry(KEYBINDINGS.toggleMode),
       ...(features.modelSwitch ? [entry(KEYBINDINGS.modelPicker)] : []),
     ]),
-    sectionLine(theme, "Scrolling:", [
+    section("Scrolling:", [
       literalSegments("PageUp/PageDown", "page"),
       literalSegments("Shift+↑/↓", "few lines"),
       literalSegments("Wheel", "scroll"),
     ]),
-    sectionLine(theme, "Mouse:", mouseEntries),
+    section("Mouse:", mouseEntries),
   ];
 }
