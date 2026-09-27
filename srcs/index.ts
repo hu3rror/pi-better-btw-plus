@@ -211,6 +211,14 @@ export default function sideChatExtension(pi: ExtensionAPI) {
   };
 
   const openSideChat = async (ctx: ExtensionContext, clear = false) => {
+    // Terminal-only feature (custom overlay + mouse routing): RPC/JSON/print
+    // modes have no TUI, where ctx.ui.custom is a silent no-op (extensions.md:
+    // "Guard terminal-only behavior with ctx.mode === 'tui'"). Notify instead
+    // so /btw outside TUI mode never looks like it ran without doing anything.
+    if (ctx.mode !== "tui") {
+      ctx.ui.notify("Cannot open side chat: interactive TUI mode required", "warning");
+      return;
+    }
     if (!ctx.model) {
       ctx.ui.notify("Cannot open side chat: no model configured", "error");
       return;

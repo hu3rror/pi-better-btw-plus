@@ -14,6 +14,17 @@
  * Everything here is pure and unit-testable; the overlay (T3/T4) wires the
  * `EditorSelectionState` holder and `decorateEditorSelection` into `render()`.
  */
+/**
+ * pi-tui's private word-navigation helpers — the Editor widget's own word-jump
+ * semantics (`findWordBackward` / `findWordForward` + `WordNavigationOptions`
+ * `{ segment, isAtomicSegment }`), verified against pi-tui 0.87.1
+ * (`dist/word-navigation.d.ts`, devDep and runtime). Only the paste-marker
+ * atomic-segment option is used; call sites pass WORD_NAV_OPTIONS below.
+ *
+ * SWAP POINT: if pi ever exposes word navigation on the package entry (or the
+ * Editor API), replace this deep import with the public export — the
+ * wordSelection tests keep guarding the behavior either way.
+ */
 import {
   findWordBackward,
   findWordForward,

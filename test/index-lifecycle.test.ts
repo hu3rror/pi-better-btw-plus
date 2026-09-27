@@ -48,23 +48,42 @@ function makeHandle() {
   };
 }
 
+/** Minimal pi mock: routes registrations into `handlers` (commands/shortcuts). */
+function makePi(handlers: Record<string, (...args: any[]) => Promise<unknown>>): any {
+  return {
+    registerShortcut: (name: string, opts: any) => {
+      handlers[`shortcut:${name}`] = opts.handler;
+    },
+    registerCommand: (name: string, opts: any) => {
+      handlers[`cmd:${name}`] = opts.handler;
+    },
+    on: () => {},
+    getThinkingLevel: () => "medium",
+  };
+}
+
+/** Base command context (mode/ui overridable per test). */
+function makeCtx(overrides: Record<string, any> = {}) {
+  return {
+    model: { id: "test-model" },
+    mode: "tui",
+    cwd: process.cwd(),
+    getSystemPrompt: () => "",
+    sessionManager: { getEntries: () => [], getLeafId: () => null },
+    modelRegistry: { streamSimple: async () => {} },
+    scopedModels: [],
+    ...overrides,
+  };
+}
+
 describe("DEBUG bug1: /btw restore after Alt+W hide", () => {
   test("btw → Alt+W hide → btw restores (same as Alt+W restore)", async () => {
-    const handlers: Record<string, (args: string, ctx: any) => Promise<unknown>> = {};
+    const handlers: Record<string, (...args: any[]) => Promise<unknown>> = {};
     let handle: ReturnType<typeof makeHandle> | null = null;
     let done: ((r: unknown) => void) | null = null;
     let notifyCount = 0;
 
-    const pi: any = {
-      registerShortcut: (name: string, opts: any) => {
-        handlers[`shortcut:${name}`] = opts.handler;
-      },
-      registerCommand: (name: string, opts: any) => {
-        handlers[`cmd:${name}`] = opts.handler;
-      },
-      on: () => {},
-      getThinkingLevel: () => "medium",
-    };
+    const pi = makePi(handlers);
 
     const ui: any = {
       custom: (factory: any, options: any) => {
@@ -89,15 +108,7 @@ describe("DEBUG bug1: /btw restore after Alt+W hide", () => {
       confirm: async () => true,
     };
 
-    const ctx: any = {
-      model: { id: "test-model" },
-      cwd: process.cwd(),
-      getSystemPrompt: () => "",
-      sessionManager: { getEntries: () => [], getLeafId: () => null },
-      modelRegistry: { streamSimple: async () => {} },
-      scopedModels: [],
-      ui,
-    };
+    const ctx: any = makeCtx({ ui });
 
     sideChatExtension(pi);
     const btw = handlers["cmd:btw"]!;
@@ -114,13 +125,52 @@ describe("DEBUG bug1: /btw restore after Alt+W hide", () => {
     expect(handle!.state().hidden).toBe(false);
     expect(notifyCount).toBe(0);
     void openP;
-    // 2. Alt+W hide
-    await altW("", ctx);
+    // 2. Alt+W hide — shortcut handlers take a single (ctx) argument.
+    await altW(ctx);
     expect(handle!.state().hidden).toBe(true);
 
     // 3. /btw again — MUST restore, exactly like Alt+W would
     await btw("", ctx);
     expect(handle!.state().hidden).toBe(false);
     expect(notifyCount).toBe(0); // must not hit the "Close or background" warn
+  });
+});
+
+describe("non-TUI mode guard (openSideChat)", () => {
+  test("/btw outside TUI mode notifies and never opens the overlay", async () => {
+    const handlers: Record<string, (...args: any[]) => Promise<unknown>> = {};
+    let customCalls = 0;
+    const notify: string[] = [];
+
+    const pi = makePi(handlers);
+
+    const ui: any = {
+      // The overlay factory must never run outside TUI mode — a silent no-op
+      // there is exactly what the guard exists to prevent.
+      custom: () => {
+        customCalls++;
+        throw new Error("ctx.ui.custom must not run outside TUI mode");
+      },
+      notify: (message: string, type: string) => notify.push(`${type}:${message}`),
+      confirm: async () => true,
+    };
+
+    const ctx: any = makeCtx({ mode: "print", ui });
+
+    sideChatExtension(pi);
+    const btw = handlers["cmd:btw"]!;
+    const side = handlers["cmd:side"]!;
+    const altW = handlers[`shortcut:${SIDE_CHAT_SHORTCUT}`]!;
+
+    await btw("", ctx);
+    await side("", ctx);
+    await altW(ctx); // shortcut handlers take a single (ctx) argument
+
+    expect(customCalls).toBe(0);
+    expect(notify).toEqual([
+      "warning:Cannot open side chat: interactive TUI mode required",
+      "warning:Cannot open side chat: interactive TUI mode required",
+      "warning:Cannot open side chat: interactive TUI mode required",
+    ]);
   });
 });
