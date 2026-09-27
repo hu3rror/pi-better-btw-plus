@@ -33,6 +33,14 @@ let capturedRunner: ExtensionRunner | null = null;
 // lives in the Symbol.for registry (global across module reloads and other
 // extensions) so re-entry is a no-op without a string-keyed prototype prop
 // another extension could collide with.
+//
+// Internal-surface dependency (ADR 0009): the patch intercepts a prototype
+// method, verified against pi-coding-agent 0.87.1
+// (dist/core/extensions/runner.d.ts L125). SWAP POINT: a public runner /
+// instance accessor removes the patch. Caveat: if the method ever becomes a
+// class field (arrow-function property), this patch stops intercepting
+// silently — extension tools vanish from the fork without an error — so
+// re-verify on every pi version bump.
 const RUNNER_CAPTURED = Symbol.for("__btwRunnerCaptured");
 if (!(ExtensionRunner.prototype as unknown as Record<symbol, unknown>)[RUNNER_CAPTURED]) {
   const origGetAllRegisteredTools =
