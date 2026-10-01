@@ -17,7 +17,7 @@
 /**
  * pi-tui's private word-navigation helpers — the Editor widget's own word-jump
  * semantics (`findWordBackward` / `findWordForward` + `WordNavigationOptions`
- * `{ segment, isAtomicSegment }`), verified against pi-tui 0.87.1
+ * `{ segment, isAtomicSegment }`), verified against pi-tui 0.99.2
  * (`dist/word-navigation.d.ts`, devDep and runtime). Only the paste-marker
  * atomic-segment option is used; call sites pass WORD_NAV_OPTIONS below.
  *

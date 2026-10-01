@@ -35,8 +35,8 @@ let capturedRunner: ExtensionRunner | null = null;
 // another extension could collide with.
 //
 // Internal-surface dependency (ADR 0009): the patch intercepts a prototype
-// method, verified against pi-coding-agent 0.87.1
-// (dist/core/extensions/runner.d.ts L125). SWAP POINT: a public runner /
+// method, verified against pi-coding-agent 0.99.2
+// (dist/core/extensions/runner.d.ts L132). SWAP POINT: a public runner /
 // instance accessor removes the patch. Caveat: if the method ever becomes a
 // class field (arrow-function property), this patch stops intercepting
 // silently — extension tools vanish from the fork without an error — so

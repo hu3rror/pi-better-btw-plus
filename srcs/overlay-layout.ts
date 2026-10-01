@@ -153,8 +153,8 @@ function resolveAnchorCol(
 /**
  * Resolve the overlay's outer box — a mirror of pi-tui's private
  * TuiBase.resolveOverlayLayout, verified byte-identical against the version
- * this extension runs with: pi-tui 0.87.1 (dist/tui.js L781-869, devDep and
- * runtime); parseSizeValue 0.87.1 L57-68.
+ * this extension runs with: pi-tui 0.99.2 (dist/tui.js L827-915, devDep and
+ * runtime); parseSizeValue 0.99.2 L72.
  *
  * SWAP POINT: if pi ever exposes this resolver publicly, replace the whole
  * body with `return resolveOverlayLayout(options, frameHeight, termWidth,
@@ -252,7 +252,7 @@ export function computeChatGeometry(
 ): ChatGeometry {
   // Frame's own height: header (FRAME_HEADER_LINES) + messages + editor +
   // footer chrome (separator + hints + bottom border). pi resolves row/col with
-  // the rendered overlay height (tui.js L929); for the fixed top-center
+  // the rendered overlay height (tui.js L975); for the fixed top-center
   // LAYOUT the exact estimate cannot change the result (row pins to marginTop,
   // col centers on width), so this only stands in for that second call.
   const frameHeight = msgHeight + editorHeight + FRAME_HEADER_LINES * 2;
@@ -287,7 +287,7 @@ export function computeSideChatHeight(rows: number): number {
  * The maxHeight comes from the same percent+clamp branch as resolveLayout
  * (resolveOverlayMaxHeight) — the overlay no longer keeps its own copy; pi
  * itself clamps the rendered overlay to maxHeight at composition time
- * (tui.js L925-926), so the band is lastRenderHeight capped by maxHeight.
+ * (tui.js L855), so the band is lastRenderHeight capped by maxHeight.
  */
 export function computeOverlayViewport(
   termRows: number,

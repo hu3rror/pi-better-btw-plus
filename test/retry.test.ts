@@ -108,6 +108,10 @@ describe("classifyRetryable", () => {
       "stream ended before message_stop",
       "you can retry your request",
       "ResourceExhausted",
+      // Sign in with ChatGPT (pi 0.99.2 retry.js): usage/user data
+      // temporarily unavailable, can arrive mid-stream without an HTTP 503.
+      "subscription_sharing_usage_unavailable",
+      "subscription_sharing_user_unavailable",
     ];
     for (const message of retryable) {
       expect(classifyRetryable(err(message))).toBe(true);
@@ -122,6 +126,9 @@ describe("classifyRetryable", () => {
       "billing error on your account",
       "Monthly usage limit reached",
       "GoUsageLimitError: free tier exhausted",
+      // Sign in with ChatGPT (pi 0.99.2 retry.js): the subscription's shared
+      // usage limit, which resets after hours rather than seconds.
+      "subscription_sharing_usage_limit_exceeded",
     ];
     for (const message of nonRetryable) {
       expect(classifyRetryable(err(message))).toBe(false);
@@ -148,6 +155,9 @@ describe("classifyRetryable", () => {
       "context length exceeded",
       "invalid params, context window exceeds limit",
       "Prompt has 300000 tokens, but the configured context size is 200000 tokens",
+      // z.ai CN endpoint (pi 0.99.2 overflow.js): token overflow wording.
+      '{"code":"1261","message":"Prompt exceeds max length"}',
+      "Prompt exceeds max length",
     ];
     for (const message of overflow) {
       expect(classifyRetryable(err(message))).toBe(false);
@@ -282,7 +292,7 @@ describe("runWithRetry", () => {
     expect(outcome.notices).toHaveLength(3);
   });
 
-  test("backoff is capped at maxAgentDelayMs (pi 0.87.1 parity)", async () => {
+  test("backoff is capped at maxAgentDelayMs (pi 0.99.2 parity)", async () => {
     const f = err("overloaded");
     const outcome = await run([f], {
       policy: { maxRetries: 5, baseDelayMs: 1000, maxAgentDelayMs: 2000 },
