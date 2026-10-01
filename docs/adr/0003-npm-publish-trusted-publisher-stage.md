@@ -16,8 +16,8 @@ public、npm 账号已开 2FA。
    项目事实标准是 bun(`bun run test` / `bun run typecheck` 均为 AGENTS.md 文档
    命令),故 CI 用 `oven-sh/setup-bun` + `bun install --frozen-lockfile` +
    `bun run test`。stage 打包只按 `files` 字段,与依赖安装方式无关。
-2. **CONTEXT.md 不补发布流词条**。模板步骤 7 要求"有 CONTEXT.md 等领域文档时
-   补发布流词条";CONTEXT.md 定位为领域术语表(Language 段),发布流不是领域
+2. **GLOSSARY.md 不补发布流词条**。模板步骤 7 要求"有 GLOSSARY.md 等领域文档时
+   补发布流词条";GLOSSARY.md 定位为领域术语表(Language 段),发布流不是领域
    词汇,塞入会污染词汇表。该决策改以本 ADR 沉淀——决策记录归决策记录,
    术语表归术语表。
 
@@ -27,4 +27,4 @@ public、npm 账号已开 2FA。
   "`npm publish` 由维护者亲自执行",且 A 流把 OIDC 仓库所有权与 2FA 双闸门
   结合,误暂存可 `npm stage reject` 回滚。
 - `npm ci` / `npm install` vs `bun install --frozen-lockfile`:选 bun——见偏离 1。
-- CONTEXT.md 词条 vs ADR 记录:选 ADR——见偏离 2。
+- GLOSSARY.md 词条 vs ADR 记录:选 ADR——见偏离 2。

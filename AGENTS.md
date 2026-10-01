@@ -14,7 +14,7 @@ Five canonical triage roles mapped to GitHub labels, all defaults (`needs-triage
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` at the repo root + `docs/adr/`. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` at the repo root + `docs/adr/`. See `docs/agents/domain.md`.
 
 ## 开发
 

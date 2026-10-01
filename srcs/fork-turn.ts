@@ -87,7 +87,7 @@ export class ForkTurnRunner {
 
   /** Fork boundary index: transcript length at construction (forked context +
    * framing block). Messages at or after it are the side chat's own; before
-   * it is the inherited forked context (CONTEXT.md: Fork boundary). */
+   * it is the inherited forked context (GLOSSARY.md: Fork boundary). */
   private readonly forkBoundaryIndex: number;
 
   /** Out-of-lane attempts in the current turn (reset at the top of run()). */
