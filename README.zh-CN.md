@@ -9,81 +9,83 @@
 [![npm version](https://img.shields.io/npm/v/pi-better-btw-plus?style=for-the-badge)](https://www.npmjs.com/package/pi-better-btw-plus)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-把当前会话 fork 到一个旁路会话，主线 agent 继续干活。任务中途想查个 API 细节、验证一个思路，打开 `/btw` 提问、拿答案、关闭，主线全程不受打扰。
+面向 [pi](https://github.com/earendil-works/pi-coding-agent)（编码 agent）的侧聊浮层扩展。主线 agent 继续干活的同时，`/btw` 把当前会话 fork 到一个独立浮层——查个 API 细节、验证一个思路，拿到答案就关掉。主线全程不受打扰。
 
-## Fork 谱系
+## 功能
 
-pi-better-btw-plus 是 [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) 的**维护型 fork**，后者又是 [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat) 的 fork。署名链：**Nico Bailon** → **yceachan** → **hu3rror**；MIT 许可证保留全部三行版权。
+### 侧聊
 
-上游包位于 [yceachan/ea-pi-extensions](https://github.com/yceachan/ea-pi-extensions) monorepo；本仓库是它的独立、持续开发 fork。
+- **不抢占主线的 fork**——侧聊是从当前会话克隆出的独立 agent，渲染在顶部浮层；主编辑器保持可见，主线照常运行。
+- **默认只读**——越权工具调用会被直接拦截（第二次违规升级并中止该轮）；`peek_main` 按需读取主线近期活动；`Alt+T` 切换编辑模式。
+- **前缀缓存友好**——侧聊请求与主线共享上下文，能命中网关前缀缓存，更快更省。
+- **会话工具**——从最新主线上下文重新 fork（`Alt+R`）、开启空白对话（`Alt+N`）、后台化不丢状态（`Alt+W`）、导出对话记录（`Alt+E`）、用 prompt pack 覆盖任意注入提示。
+- **文件冲突防护**——侧聊打开期间主线写过的文件会受到保护：向这些路径写入前会先要求确认。
 
-## 安装
+### 与 pi 官方保持一致
+
+不引入自创的交互语言，快捷键与行为都遵循 pi 官方惯例，侧聊用起来和主会话完全一样：
+
+- **快捷键与主会话一致**——复制/清空、粘贴、复制消息、模型选择、键位表均遵循 pi 官方绑定（`tui.input.copy`、`app.clear`、`app.clipboard.pasteImage`、`app.message.copy`、`app.model.select`、`app.tools.expand`）；键位冲突时让位给 pi：`Alt+T` 切换模式，把 `Ctrl+T` 留给 pi 的思考开关。
+- **行为与主会话一致**——重试、溢出判断、剪贴板、模型选择的行为与 pi 本身一致，浮层布局也沿用 pi 的窗口几何。
+
+### 终端肌肉记忆，浮层内重新实现
+
+侧聊打开期间独占终端鼠标，主会话从 Windows Terminal 或 `AgentSession` 继承的那些便利，需要在浮层里重新实现：
+
+| 功能 | 说明 |
+| --- | --- |
+| **输入框选区** | 输入框内拖选实时反色高亮；双击选词、三击选中整行。`Ctrl+C` / `Ctrl+Shift+C` 复制。 |
+| **右键复制与粘贴** | 聊天区拖选后右键复制（延续 Windows Terminal 肌肉记忆）；输入框右键把系统剪贴板内容粘贴进来，通过编辑器自带的粘贴逻辑。 |
+| **Fork 模型切换**（`Ctrl+L`） | 侧聊内可随时换用任意已配置的模型，无需重建 fork；只对侧聊生效，主线模型不受影响。 |
+| **单轮自动重试** | 与主会话共用 `settings.retry` 预算；服务商出现暂时性错误时自动退避重试，带实时倒计时，`Esc` 可取消。 |
+| **`Ctrl+C` 清空输入** | 无选区时 `Ctrl+C` 清空输入框；复制成功后选区消失，下一次 `Ctrl+C` 恢复清空行为。 |
+| **`Alt+Shift+C` 复制整个草稿** | 复制全部草稿文本，粘贴标记展开——与真正提交给 agent 的内容完全一致；不支持 kitty 协议的终端也能用。 |
+| **键位表弹窗**（`Ctrl+O`） | 底部提示条只显示高频键；按 `Ctrl+O` 弹出完整键位表，按功能分组。 |
+| **功能开关** | `features.rightClickCopyPaste` / `modelSwitch` / `retry` / `editorSelection` 按配置层逐项关闭。 |
+
+浮层打开期间会接管全部鼠标操作：滚轮滚动、拖拽选择、右键复制/粘贴；`Alt+W` 后台化后鼠标交还给终端。
+
+### 输入框选区
+
+- **拖选**——反色高亮实时跟随（约 30fps）。
+- **双击**——选中光标下的词；**三击**——选中整行。
+- 选区是临时的：打字或移动光标即消失；不会跨过 `[paste #N …]` 粘贴标记；自动补全弹窗打开时禁用。
+
+## 安装与快速上手
 
 ```bash
 pi install npm:pi-better-btw-plus
 ```
 
-在 pi TUI 里用 `/btw`（别名 `/side`）或 `Alt+W` 打开旁路会话。提问、`Enter` 发送、`Esc` 关闭；重新打开继续同一段对话。
+pi TUI 中用 `/btw`（或原名 `/side`）或 `Alt+W` 打开。提问、`Enter` 发送、`Esc` 关闭；重新打开继续同一段对话。
 
-## 兼容性
-
-已验证 pi `0.87.1`（`@earendil-works/pi-*` devDependencies 锁定 typecheck 与测试所针对的版本）。
-
-## 亮点
-
-`@yceachan/pi-better-btw` 的全部功能都在——aside-agent 自我认知、只读车道强制、prompt pack 覆盖、`peek_main`、对话导出。本 fork 另新增：
-
-| 功能 | 说明 |
-| --- | --- |
-| **输入框选区**（v1.4.0） | 输入框内拖选实时反色高亮；双击选词、三击选整个 visual 行。`Ctrl+C` / `Ctrl+Shift+C` 复制。 |
-| **右键复制与粘贴** | 聊天区拖选后右键复制（延续 Windows Terminal 肌肉记忆）；输入框右键把系统剪贴板粘贴进编辑器，走编辑器内置粘贴入口。 |
-| **Fork 模型切换**（`Ctrl+L`） | 侧聊内任选已认证模型，无需重建 fork。仅作用于 fork：主线模型不受影响。 |
-| **Turn 级自动重试** | 与主会话共用 `settings.retry` 预算。瞬时 provider 错误退避重试，实时倒计时；`Esc` 取消。 |
-| **`Ctrl+C` 清空对齐** | 无选区时 `Ctrl+C` 清空输入框；复制成功消费选区，下一次 `Ctrl+C` 回到清空语义。 |
-| **`Alt+Shift+C` 整稿复制** | 复制整个草稿，paste 标记展开——与提交给 agent 的内容一致；无 kitty 协议的终端同样可用。 |
-| **功能开关** | `features.rightClickCopyPaste` / `modelSwitch` / `retry` / `editorSelection` 按配置层逐项关闭。 |
-
-### 输入框选区
-
-侧聊打开期间独占终端鼠标，输入框因此在浮层内获得完整选区能力：
-
-- **拖选**——反色高亮实时跟随（约 30fps）。
-- **双击**——选中光标下的词。
-- **三击**——选中整个 visual 行。
-- **`Ctrl+C` / `Ctrl+Shift+C`**——按 chat 选区 → editor 选区 → 清空输入的顺序复制；复制成功消费选区。
-- 选区是 transient 的：打字或移动光标即消失；绝不跨越 `[paste #N …]` 标记；autocomplete 弹层打开时禁用。`features.editorSelection: false` 关闭整个能力。
-
-<img src="https://raw.githubusercontent.com/hu3rror/pi-better-btw-plus/main/docs/overlay.png" alt="pi-better-btw-plus overlay" style="zoom:33%;" />
+> [!NOTE]
+> 已验证与 pi `0.87.1` 兼容。
 
 ## 快捷键
 
-浮层底部的提示条只显示高频键；按 `Ctrl+O` 打开键位表屏，查看按功能分组的完整键位（导航 / 对话 / 复制粘贴 / 模式与模型 / 滚动 / 鼠标）。
-
 | 按键 | 作用 |
 | --- | --- |
-| `Ctrl+O` | 打开键位表屏（完整键位表模态） |
 | `Alt+W` | 打开（关闭时）/ 后台化（显示时）/ 恢复（隐藏时） |
-| `Enter` | 发送 |
-| `Esc` | 中断流式输出或取消重试等待；空闲时关闭 |
+| `Ctrl+O` | 弹出完整的键位表 |
+| `Enter` / `Esc` | 发送 / 中断流式输出或取消重试等待；空闲时关闭 |
 | `Alt+T` | 切换只读 / 编辑模式 |
 | `Alt+R` | 从最新主线上下文重新 fork |
 | `Alt+N` | 开始空白对话 |
 | `Alt+E` | 导出对话到 `$CWD/.agents/eval/pi-better-btw-<timestamp>.md` |
 | `Ctrl+L` | Fork 模型选择器（`↑/↓` 选择，`Enter` 确认，`Esc` 取消） |
-| `Ctrl+C` / `Ctrl+Shift+C` | 复制当前选区（chat 或 editor）；无选区时纯 `Ctrl+C` 清空输入 |
-| `Ctrl+X` | 复制最后一条旁路 assistant 消息 |
-| `Alt+Shift+C` | 复制输入框全部文本（paste 标记展开） |
-| `Ctrl+V` / `Alt+V` | 把系统剪贴板粘贴进编辑器 |
+| `Ctrl+C` / `Ctrl+Shift+C` | 复制当前选区（聊天区或输入框）；无选区时 `Ctrl+C` 清空输入 |
+| `Ctrl+X` | 复制最后一条侧聊助手消息 |
+| `Alt+Shift+C` | 复制输入框全部文本（粘贴标记展开） |
+| `Ctrl+V` / `Alt+V` | 把系统剪贴板内容粘贴进输入框 |
 | `PgUp` / `PgDn`、`Shift+↑` / `Shift+↓`、鼠标滚轮 | 滚动聊天历史 |
-| 鼠标拖拽 | 选择聊天文本（反色高亮） |
-| 双击（聊天区） | 选中渲染行 |
-| 鼠标右键（聊天区） | 复制保留的选区 |
-| 鼠标右键（输入框） | 粘贴 |
+| 鼠标拖拽 / 双击 | 选择聊天文本（反色高亮）/ 选中整行 |
+| 鼠标右键 | 复制保留的选区（聊天区）/ 粘贴（输入框） |
 
 ## 命令
 
-- `/btw` —— 打开旁路会话；别名 `/side`（保留上游命令名兼容）。
-- `peek_main` —— 仅旁路 agent 可用；按需读取主线会话近期活动。`lines`（默认 20，最大 50）、`since_fork`（仅显示旁路打开之后的活动）。
+- `/btw`、`/side`——打开侧聊（两个命令均已注册、效果相同；`/btw` 与项目同名，`/side` 是沿用旧名）。
+- `peek_main`——仅侧聊 agent 可用；按需读取主线会话近期活动。`lines`（默认 20，最大 50）、`since_fork`（仅显示侧聊打开之后的活动）。
 
 ## 配置
 
@@ -95,10 +97,10 @@ pi install npm:pi-better-btw-plus
 | 用户 | `~/.pi/agent/pi-better-btw/config.json` |
 | 项目 | `<project>/.pi/pi-better-btw/config.json` |
 
-- `features` —— 功能开关，每项默认 `true`：`rightClickCopyPaste`、`modelSwitch`、`retry`、`editorSelection`。
-- `readOnlyExtensionAllowlist` —— 只读车道允许的扩展工具名；各层取并集，内置 `read`/`grep`/`find`/`ls` 与 `peek_main` 始终包含。
-- `readOnlyExtensionAllowlistExclude` —— 移除内置默认项。
-- `promptPack` —— 用自定义 markdown 覆盖任意注入提示（framing、焦点锚、车道提醒）；缺失键回退到随包 `prompts/`。
+- `features`——功能开关，每项默认 `true`：`rightClickCopyPaste`、`modelSwitch`、`retry`、`editorSelection`。
+- `readOnlyExtensionAllowlist`——只读模式下允许调用的扩展工具；各层取并集，内置 `read`/`grep`/`find`/`ls` 与 `peek_main` 始终包含。
+- `readOnlyExtensionAllowlistExclude`——移除内置默认项。
+- `promptPack`——用你自己的 markdown 文件覆盖任意注入提示（如 framing、焦点锚、越界提醒），缺失的键回退到包内自带 `prompts/`。
 
 ```json
 {
@@ -109,34 +111,13 @@ pi install npm:pi-better-btw-plus
 
 ## 工作原理
 
-- 旁路会话克隆当前会话到独立 agent（完整工具集），渲染在非抢占式顶部浮层；主编辑器保持可见。
-- fork 保留主线 system prompt 于 system 槽位，并逐字注入 fork 快照——旁路请求是主线请求的 token 前缀，命中网关前缀缓存。
-- 只读模式（默认）被强制：越权工具调用硬阻断，第二次违规升级并中止该轮。`peek_main` 按需读取主线近期活动。
-- 浮层打开期间启用 xterm 鼠标上报并吞掉全部鼠标序列：滚轮滚动、拖拽选择、右键复制/粘贴。上报跟随浮层可见性——`Alt+W` 后台化时把鼠标还给终端。
+- 侧聊是把当前会话克隆出的独立 agent，渲染在顶部浮层——主编辑器保持可见，主线照常运行。
+- 只读模式（默认开启）强制生效：越权工具调用被直接拦截，第二次违规升级并中止该轮。`peek_main` 按需读取主线近期活动。
+- 浮层打开期间会接管鼠标：滚轮滚动、拖拽选择、右键复制/粘贴；`Alt+W` 后台化后鼠标交还给终端。
 
 ## 开发
 
-pi 直接加载 TypeScript，无构建步骤。把 pi 的扩展加载器指向 `./srcs/index.ts`，改完 `/reload` 即可。
-
-```text
-srcs/
-├── index.ts                 # 扩展入口：命令、快捷键、浮层生命周期
-├── side-chat-overlay.ts     # TUI 浮层、agent 生命周期、车道强制、鼠标路由
-├── fork-turn.ts             # turn 运行器：重试退避、车道强制、相位
-├── pointer-gesture.ts       # SGR 按下/拖拽/双击/三击/右键分类器
-├── editor-selection.ts      # 视觉空间编辑器选区：高亮区间 + 复制文本
-├── side-chat-messages.ts    # 消息渲染、换行、选择、滚动
-├── config.ts                # 分层配置解析
-├── prompt-pack.ts           # 提示包加载 + 模板替换
-├── fork-surgery.ts          # 共享前缀 fork 快照手术
-├── overlay-layout.ts        # 纯浮层几何
-├── retry.ts                 # turn 级重试引擎
-├── provider-retry.ts        # pi provider 层重试注入
-├── clipboard-read.ts        # 平台剪贴板读取：native → xclip/wl-copy → OSC 52
-├── model-switch.ts          # Ctrl+L 模型选择器
-├── shortcuts.ts             # 快捷键绑定
-└── …                        # status-channel、export、tool-wrapper、file tracker、mouse、write-paths
-```
+pi 直接加载 TypeScript，无构建步骤。把 pi 的扩展加载器指向 `./srcs/index.ts`（入口；`srcs/` 其余文件为浮层、越界拦截、重试与剪贴板相关代码），改完 `/reload` 即可。
 
 ```bash
 bun install
@@ -144,16 +125,14 @@ bun run typecheck
 bun test
 ```
 
-发布包包含 `srcs/`、`prompts/`、`config.json`、文档与 `banner.png`；测试不进 tarball。
-
 ## 限制
 
-- 同一时间只能有一个旁路会话；无法在另一个可见浮层之上打开。
+- 同一时间只能开一个侧聊；无法在另一个可见浮层之上打开。
 - 不会把消息合并回主线会话。
-- bash 重叠检测是启发式的——覆盖常见写模式，非全部。
+- bash 写入冲突检测是启发式的——覆盖常见写模式，并非全部。
 - `peek_main` 按需读取，非实时。
 - 鼠标交互仅在常规（非全屏）TUI 模式下可用。
 
-## License
+## License 与起源
 
-MIT —— 见 [LICENSE](LICENSE)。保留全部三行版权：Nico Bailon（上游）、yceachan（中间 fork）、hu3rror（本 fork）。
+MIT —— 见 [LICENSE](LICENSE)。本项目是 [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw) 的持续维护 fork，其上游是 [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat)。保留全部三行版权：Nico Bailon、yceachan、hu3rror。

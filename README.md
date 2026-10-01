@@ -9,62 +9,66 @@
 [![npm version](https://img.shields.io/npm/v/pi-better-btw-plus?style=for-the-badge)](https://www.npmjs.com/package/pi-better-btw-plus)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
-Fork the current conversation into a side chat while the main agent keeps working. In the middle of a task, open `/btw`, ask about an API detail or sanity-check an approach, get an answer, close it. The main thread is never interrupted.
+A side-chat overlay for [pi](https://github.com/earendil-works/pi-coding-agent), the coding agent. While the main agent keeps working, `/btw` forks the current conversation into its own overlay — ask about an API detail, sanity-check an approach, get an answer, close it. The main thread is never interrupted.
 
-## Fork lineage
+## Features
 
-pi-better-btw-plus is a **maintained fork** of [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw), which is itself a fork of [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat). Author chain: **Nico Bailon** → **yceachan** → **hu3rror**. The MIT license keeps all three copyright lines.
+### The side chat
 
-The upstream package lives in the [yceachan/ea-pi-extensions](https://github.com/yceachan/ea-pi-extensions) monorepo; this repo is its standalone, actively developed fork.
+- **Non-blocking fork** — the side chat is a fresh agent cloned from your current session, rendered in a top overlay. The main editor stays visible underneath and keeps running.
+- **Read-only by default** — out-of-lane tool calls are hard-blocked (a second violation escalates and aborts the turn); `peek_main` reads the main session's recent activity on demand; `Alt+T` switches to edit mode.
+- **Prefix-cache friendly** — the side request shares the main session's context, so it hits the gateway's prefix cache and stays fast and cheap.
+- **Conversation tools** — re-fork from the latest context (`Alt+R`), start an empty conversation (`Alt+N`), background without losing state (`Alt+W`), export the transcript (`Alt+E`), override any injected prompt with a prompt pack.
+- **Write-overlap guard** — files the main session has written while the side chat is open are protected: writing to one of those paths asks for confirmation first.
 
-## Install
+### Aligned with pi
+
+No custom interaction language — shortcuts and behavior follow pi's own conventions, so the side chat feels like the main session:
+
+- **Shortcuts mirror the main session** — copy/clear, paste, last-message copy, model picker and keymap screen follow pi's official bindings (`tui.input.copy`, `app.clear`, `app.clipboard.pasteImage`, `app.message.copy`, `app.model.select`, `app.tools.expand`). When a key collides, pi wins: `Alt+T` toggles mode so `Ctrl+T` stays pi's thinking toggle.
+- **Behavior matches the main session** — retry, overflow handling, clipboard and model selection work exactly like pi itself, and the overlay follows pi's own window geometry.
+
+### Terminal muscle memory, re-implemented
+
+The overlay owns the terminal's mouse while open, so conveniences the main session inherits from Windows Terminal or `AgentSession` are rebuilt inside it:
+
+| Feature | What you get |
+| --- | --- |
+| **Input editor selection** | Drag-select inside the input box with a live inverse-video highlight; double-click selects a word, triple-click a whole visual line. `Ctrl+C` / `Ctrl+Shift+C` copy it. |
+| **Right-click copy & paste** | Drag-select chat text and right-click to copy — Windows Terminal muscle memory. Right-click inside the input editor pastes the system clipboard through the editor's own paste entry. |
+| **Fork model switch** (`Ctrl+L`) | Pick any authenticated model for the side chat without rebuilding the fork. Fork-local: the main session's model is never touched. |
+| **Turn-level auto-retry** | Shares pi's `settings.retry` budget. Transient provider errors back off with a live countdown; `Esc` cancels. |
+| **`Ctrl+C` clear-input parity** | With nothing selected, `Ctrl+C` clears the input box. A successful copy consumes the selection, so the next `Ctrl+C` returns to clearing. |
+| **`Alt+Shift+C` full-draft copy** | Copies the whole draft with paste markers expanded — exactly what a submit would send. Works on terminals without the kitty protocol too. |
+| **Keymap screen** (`Ctrl+O`) | The hint bar shows only the essentials; `Ctrl+O` opens the full keymap, grouped by function. |
+| **Feature kill switches** | `features.rightClickCopyPaste` / `modelSwitch` / `retry` / `editorSelection` turn any of the above off per config layer. |
+
+While the overlay is open it consumes every mouse sequence: wheel scrolls, drag selects, right-click copies or pastes. Background it (`Alt+W`) and the mouse returns to the terminal.
+
+### Input editor selection
+
+- **Drag** — select a range with a live inverse-video highlight (~30fps).
+- **Double-click** — select the word under the cursor; **triple-click** — the whole visual line.
+- Selections are transient (typing or moving the cursor clears them), never cross a `[paste #N …]` marker, and are disabled while the autocomplete popup is open.
+
+## Install & quick start
 
 ```bash
 pi install npm:pi-better-btw-plus
 ```
 
-In pi's TUI, open the side chat with `/btw` (alias `/side`) or `Alt+W`. Ask, press `Enter`, close with `Esc`. Reopening continues the same conversation.
+In pi's TUI, open the side chat with `/btw` (or the original `/side`) or `Alt+W`. Ask, press `Enter`, close with `Esc`. Reopening continues the same conversation.
 
-## Compatibility
-
-Verified against pi `0.87.1` (the `@earendil-works/pi-*` devDependencies pin the typecheck and test surface).
-
-## Highlights
-
-Everything in `@yceachan/pi-better-btw` is here — aside-agent self-cognition, read-only lane enforcement, prompt-pack overrides, `peek_main`, transcript export. This fork adds:
-
-| Feature | What you get |
-| --- | --- |
-| **Input editor selection** (v1.4.0) | Drag-select inside the input box with a live inverse-video highlight; double-click selects a word, triple-click a whole visual line. `Ctrl+C` / `Ctrl+Shift+C` copy it. |
-| **Right-click copy & paste** | Drag-select chat text and right-click to copy — Windows Terminal muscle memory. Right-click inside the input editor pastes the system clipboard through the editor's own paste entry. |
-| **Fork model switching** (`Ctrl+L`) | Pick any authenticated model for the side chat without rebuilding the fork. Fork-local: the main session's model is never touched. |
-| **Turn-level auto-retry** | Shares pi's `settings.retry` budget. Transient provider errors back off with a live countdown; `Esc` cancels. |
-| **`Ctrl+C` clear-input parity** | With nothing selected, `Ctrl+C` clears the input box. A successful copy consumes the selection, so the next `Ctrl+C` returns to clearing. |
-| **`Alt+Shift+C` full-draft copy** | Copies the whole draft with paste markers expanded — exactly what a submit would send. Works on terminals without the kitty protocol too. |
-| **Feature kill switches** | `features.rightClickCopyPaste` / `modelSwitch` / `retry` / `editorSelection` turn any of the above off per config layer. |
-
-### Input editor selection
-
-The side chat owns the terminal's mouse while open, so the input editor gets real selection support instead of the terminal's:
-
-- **Drag** — select a range with a live inverse-video highlight (~30fps).
-- **Double-click** — select the word under the cursor.
-- **Triple-click** — select the whole visual line.
-- **`Ctrl+C` / `Ctrl+Shift+C`** — copy the chat selection first, then the editor selection, then clear the input. Copying consumes the selection.
-- Selections are transient: typing or moving the cursor clears them. They never cross a `[paste #N …]` marker, and they are disabled while the autocomplete popup is open. `features.editorSelection: false` disables the whole surface.
-
-<img src="https://raw.githubusercontent.com/hu3rror/pi-better-btw-plus/main/docs/overlay.png" alt="pi-better-btw-plus overlay" />
+> [!NOTE]
+> Verified against pi `0.87.1`.
 
 ## Keybindings
 
-The overlay's bottom hint bar shows only the essentials; press `Ctrl+O` to open the keymap screen with the full keymap, grouped by function (navigation / conversation / copy & paste / mode & model / scrolling / mouse).
-
 | Key | Action |
 | --- | --- |
-| `Ctrl+O` | Open the keymap screen (full keymap modal) |
 | `Alt+W` | Open (closed) / background (visible) / restore (hidden) |
-| `Enter` | Send |
-| `Esc` | Interrupt streaming or cancel a retry backoff; close when idle |
+| `Ctrl+O` | Open the keymap screen (full keymap modal) |
+| `Enter` / `Esc` | Send / interrupt streaming or cancel a retry backoff; close when idle |
 | `Alt+T` | Toggle read-only / edit mode |
 | `Alt+R` | Re-fork from the latest main context |
 | `Alt+N` | Start an empty conversation |
@@ -75,14 +79,12 @@ The overlay's bottom hint bar shows only the essentials; press `Ctrl+O` to open 
 | `Alt+Shift+C` | Copy the whole input editor text (paste markers expanded) |
 | `Ctrl+V` / `Alt+V` | Paste the system clipboard into the editor |
 | `PgUp` / `PgDn`, `Shift+↑` / `Shift+↓`, mouse wheel | Scroll the chat history |
-| Mouse drag | Select chat text (inverse-video highlight) |
-| Double-click (chat) | Select the rendered line |
-| Mouse right-click (chat) | Copy the retained selection |
-| Mouse right-click (editor) | Paste |
+| Mouse drag / double-click | Select chat text (inverse-video highlight) / the rendered line |
+| Mouse right-click | Copy the retained selection (chat) / paste (editor) |
 
 ## Commands
 
-- `/btw` — open the side chat; alias `/side` (upstream name kept for compatibility).
+- `/btw`, `/side` — open the side chat (both are registered, aliases of each other; `/btw` is the project's namesake, `/side` the original name).
 - `peek_main` — available to the side agent only; reads the main session's recent activity. `lines` (default 20, max 50), `since_fork` (only activity after the side chat opened).
 
 ## Configuration
@@ -109,42 +111,19 @@ The overlay's bottom hint bar shows only the essentials; press `Ctrl+O` to open 
 
 ## How it works
 
-- The side chat clones the current session into its own agent with the full tool set, rendered in a non-capturing top overlay; the main editor stays visible underneath.
-- The fork keeps the main lane's system prompt in the system slot and injects the fork snapshot verbatim, so the side request is a token prefix of the main request — gateway prefix-cache hits.
-- Read-only mode (default) is enforced: an out-of-lane tool call is hard-blocked, a second violation escalates and aborts the turn. `peek_main` reads the main session's recent activity on demand.
-- While the overlay is open, xterm mouse reporting is enabled and every mouse sequence is consumed: wheel scrolls, drag selects, right-click copies or pastes. Reporting follows overlay visibility — backgrounding (`Alt+W`) hands the mouse back to the terminal.
+- The side chat is a fresh agent cloned from your current session, rendered in a top overlay — the main editor stays visible and keeps running underneath.
+- Read-only mode (default) is enforced: an out-of-lane tool call is blocked, and a second violation escalates and aborts the turn. `peek_main` reads the main session's recent activity on demand.
+- While the overlay is open it owns the mouse: wheel scrolls, drag selects, right-click copies or pastes. Backgrounding (`Alt+W`) returns the mouse to the terminal.
 
 ## Development
 
-pi loads TypeScript directly — there is no build step. Point pi's extension loader at `./srcs/index.ts` and `/reload` after edits.
-
-```text
-srcs/
-├── index.ts                 # extension entry: commands, shortcut, overlay lifecycle
-├── side-chat-overlay.ts     # TUI overlay, agent lifecycle, lane enforcement, mouse routing
-├── fork-turn.ts             # turn runner: retry backoff, lane enforcement, phases
-├── pointer-gesture.ts       # SGR press/drag/double-/triple-click/right-click classifier
-├── editor-selection.ts      # visual-space editor selection: highlight ranges + copy text
-├── side-chat-messages.ts    # message rendering, wrapping, selection, scrolling
-├── config.ts                # layered config resolution
-├── prompt-pack.ts           # prompt-pack loader + template substitution
-├── fork-surgery.ts          # shared-prefix fork snapshot surgery
-├── overlay-layout.ts        # pure overlay geometry
-├── retry.ts                 # turn-level retry engine
-├── provider-retry.ts        # pi provider-layer retry injection
-├── clipboard-read.ts        # platform clipboard read: native → xclip/wl-copy → OSC 52
-├── model-switch.ts          # Ctrl+L model picker
-├── shortcuts.ts             # hotkey bindings
-└── …                        # status-channel, export, tool-wrapper, file tracker, mouse, write-paths
-```
+pi loads TypeScript directly — there is no build step. Point pi's extension loader at `./srcs/index.ts` (the entry point; the rest of `srcs/` holds the overlay, lane enforcement, retry and clipboard code) and run `/reload` after edits.
 
 ```bash
 bun install
 bun run typecheck
 bun test
 ```
-
-The package ships `srcs/`, `prompts/`, `config.json`, the docs and `banner.png`; tests stay out of the tarball.
 
 ## Limitations
 
@@ -154,6 +133,6 @@ The package ships `srcs/`, `prompts/`, `config.json`, the docs and `banner.png`;
 - `peek_main` is on-demand, not live.
 - Mouse interaction works only in the regular (non-fullscreen) TUI mode.
 
-## License
+## License & origin
 
-MIT — see [LICENSE](LICENSE). All three copyright lines are retained: Nico Bailon (upstream), yceachan (intermediate fork), hu3rror (this fork).
+MIT — see [LICENSE](LICENSE). This project is a maintained fork of [`@yceachan/pi-better-btw`](https://www.npmjs.com/package/@yceachan/pi-better-btw), itself a fork of [nicobailon/pi-side-chat](https://github.com/nicobailon/pi-side-chat). All three copyright lines are retained: Nico Bailon, yceachan, hu3rror.
