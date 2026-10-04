@@ -85,6 +85,9 @@ describe("classifyRetryable", () => {
     const retryable = [
       "The model is overloaded, please try again later",
       "The model is currently experiencing high demand",
+      // pi 1.0.1 (issue #10278): "Selected model is at capacity" is retried
+      // instead of ending the turn.
+      "Selected model is at capacity",
       "rate limit reached, slow down",
       "429 Too Many Requests",
       "500 Internal Server Error",
@@ -108,7 +111,7 @@ describe("classifyRetryable", () => {
       "stream ended before message_stop",
       "you can retry your request",
       "ResourceExhausted",
-      // Sign in with ChatGPT (pi 0.99.2 retry.js): usage/user data
+      // Sign in with ChatGPT (pi 1.0.2 retry.js): usage/user data
       // temporarily unavailable, can arrive mid-stream without an HTTP 503.
       "subscription_sharing_usage_unavailable",
       "subscription_sharing_user_unavailable",
@@ -126,7 +129,7 @@ describe("classifyRetryable", () => {
       "billing error on your account",
       "Monthly usage limit reached",
       "GoUsageLimitError: free tier exhausted",
-      // Sign in with ChatGPT (pi 0.99.2 retry.js): the subscription's shared
+      // Sign in with ChatGPT (pi 1.0.2 retry.js): the subscription's shared
       // usage limit, which resets after hours rather than seconds.
       "subscription_sharing_usage_limit_exceeded",
     ];
@@ -155,7 +158,7 @@ describe("classifyRetryable", () => {
       "context length exceeded",
       "invalid params, context window exceeds limit",
       "Prompt has 300000 tokens, but the configured context size is 200000 tokens",
-      // z.ai CN endpoint (pi 0.99.2 overflow.js): token overflow wording.
+      // z.ai CN endpoint (pi 1.0.2 overflow.js): token overflow wording.
       '{"code":"1261","message":"Prompt exceeds max length"}',
       "Prompt exceeds max length",
     ];
@@ -292,7 +295,7 @@ describe("runWithRetry", () => {
     expect(outcome.notices).toHaveLength(3);
   });
 
-  test("backoff is capped at maxAgentDelayMs (pi 0.99.2 parity)", async () => {
+  test("backoff is capped at maxAgentDelayMs (pi 1.0.2 parity)", async () => {
     const f = err("overloaded");
     const outcome = await run([f], {
       policy: { maxRetries: 5, baseDelayMs: 1000, maxAgentDelayMs: 2000 },

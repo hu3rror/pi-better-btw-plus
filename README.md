@@ -60,7 +60,7 @@ pi install npm:pi-better-btw-plus
 In pi's TUI, open the side chat with `/btw` (or the original `/side`) or `Alt+W`. Ask, press `Enter`, close with `Esc`. Reopening continues the same conversation.
 
 > [!NOTE]
-> Verified against pi `0.99.2`.
+> Verified against pi `1.0.2`.
 
 ## Keybindings
 

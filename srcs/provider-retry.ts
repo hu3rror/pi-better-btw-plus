@@ -10,7 +10,7 @@
  * The helper does NOT implement retry: it only injects options (D1, along
  * with the pre-agreed reason to not port pi's backoff algorithm or deep-import
  * `dist/utils/provider-retry.js`). The `??` fallback order mirrors pi-coding-
- * agent 0.99.2 `dist/core/sdk.js` streamFn wiring verbatim (`buildRequestOptions`
+ * agent 1.0.2 `dist/core/sdk.js` streamFn wiring verbatim (`buildRequestOptions`
  * L181-191, `streamFn` L250):
  * `options?.X ?? providerRetrySettings.X` — explicit caller options win.
  *
