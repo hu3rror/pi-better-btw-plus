@@ -44,6 +44,11 @@ export interface SideChatFeatures {
   retry: boolean;
   /** Left-drag selection on the input editor (spec #24). Default: true. */
   editorSelection: boolean;
+  /** Fullscreen copy-on-select mirror (spec #37): copy a just-formed
+   * selection on release without consuming it, like pi's
+   * `fullscreenCopyOnSelect`. Default: false (hotkey/right-click copy stays
+   * the default copy path in both modes). */
+  fullscreenCopyOnSelect: boolean;
 }
 
 export interface SideChatConfig {
@@ -211,6 +216,7 @@ function parseConfigLayer(raw: unknown, dir: string): ConfigLayer {
           modelSwitch: parseBoolean(featureRec.modelSwitch),
           retry: parseBoolean(featureRec.retry),
           editorSelection: parseBoolean(featureRec.editorSelection),
+          fullscreenCopyOnSelect: parseBoolean(featureRec.fullscreenCopyOnSelect),
         }
       : undefined,
   };
@@ -295,6 +301,7 @@ const FEATURE_KEYS = [
   "modelSwitch",
   "retry",
   "editorSelection",
+  "fullscreenCopyOnSelect",
 ] as const;
 function mergeFeatures(layers: ConfigLayer[]): SideChatFeatures {
   const features: SideChatFeatures = {
@@ -302,6 +309,9 @@ function mergeFeatures(layers: ConfigLayer[]): SideChatFeatures {
     modelSwitch: true,
     retry: true,
     editorSelection: true,
+    // Opt-in mirror (spec #37): unlike the other switches this one defaults
+    // to false — gestures must never copy on their own unless asked.
+    fullscreenCopyOnSelect: false,
   };
   for (const layer of layers) {
     const layerFeatures = layer.features;

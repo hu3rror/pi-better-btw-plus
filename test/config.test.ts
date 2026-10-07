@@ -560,11 +560,12 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
 
 /**
  * Feature switches (D11): per-leaf-key merge, higher layer wins, keys no
- * layer defines keep their default (true). A layer can disable one behavior
- * (`"retry": false`) without re-declaring the others.
+ * layer defines keep their defaults (four switches true, the
+ * fullscreenCopyOnSelect opt-in (spec #37) false). A layer can disable one
+ * behavior (`"retry": false`) without re-declaring the others.
  */
 describe("config.ts features (D11)", () => {
-  test("no features anywhere: all four default to true", () => {
+  test("no features anywhere: defaults hold (four true, fullscreenCopyOnSelect false)", () => {
     const tree = makeTree({});
     try {
       expect(tree.load().features).toEqual({
@@ -572,6 +573,7 @@ describe("config.ts features (D11)", () => {
         modelSwitch: true,
         retry: true,
         editorSelection: true,
+        fullscreenCopyOnSelect: false,
       });
     } finally {
       tree.cleanup();
@@ -594,6 +596,7 @@ describe("config.ts features (D11)", () => {
         modelSwitch: true,
         retry: true,
         editorSelection: true,
+        fullscreenCopyOnSelect: false,
       });
     } finally {
       tree.cleanup();
@@ -611,6 +614,7 @@ describe("config.ts features (D11)", () => {
         modelSwitch: true,
         retry: true,
         editorSelection: true,
+        fullscreenCopyOnSelect: false,
       });
     } finally {
       tree.cleanup();
@@ -628,6 +632,7 @@ describe("config.ts features (D11)", () => {
         modelSwitch: false,
         retry: true,
         editorSelection: true,
+        fullscreenCopyOnSelect: false,
       });
     } finally {
       tree.cleanup();
@@ -646,6 +651,7 @@ describe("config.ts features (D11)", () => {
         modelSwitch: false,
         retry: true,
         editorSelection: true,
+        fullscreenCopyOnSelect: false,
       });
     } finally {
       tree.cleanup();
@@ -662,6 +668,7 @@ describe("config.ts features (D11)", () => {
         modelSwitch: true,
         retry: true,
         editorSelection: true,
+        fullscreenCopyOnSelect: false,
       });
     } finally {
       tree.cleanup();
@@ -676,6 +683,17 @@ describe("config.ts features (D11)", () => {
     });
     try {
       expect(tree.load().features.editorSelection).toBe(true);
+    } finally {
+      tree.cleanup();
+    }
+  });
+
+  test("fullscreenCopyOnSelect defaults false and can be opted in per layer (spec #37)", () => {
+    const tree = makeTree({
+      user: { features: { fullscreenCopyOnSelect: true } },
+    });
+    try {
+      expect(tree.load().features.fullscreenCopyOnSelect).toBe(true);
     } finally {
       tree.cleanup();
     }

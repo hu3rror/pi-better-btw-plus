@@ -80,17 +80,38 @@ export default function sideChatExtension(pi: ExtensionAPI) {
   let lastMessages: AgentMessage[] | null = null;
   let mouseTerminal: Terminal | null = null;
   let removeMouseListener: (() => void) | null = null;
+  /** Fullscreen (ADR 0012): pi owns the xterm reporting stream, so the
+   * extension must never write enable/disable sequences — its disable on
+   * hide/close would kill pi's own fullscreen mouse input until the alt
+   * screen re-enters (pi re-enables only at entry). Regular mode: the
+   * extension owns the stream, unchanged. */
+  let mouseReportingOwnedByPi = false;
+
+  /**
+   * Write reporting sequences only while the extension owns the stream
+   * (regular mode). In fullscreen they are never written at all; overlay
+   * visibility already gates pi's own dispatch, no toggling needed.
+   */
+  const writeMouseReporting = (on: boolean) => {
+    if (!mouseTerminal) return;
+    if (mouseReportingOwnedByPi) return;
+    if (on) enableMouseReporting(mouseTerminal);
+    else disableMouseReporting(mouseTerminal);
+  };
 
   /**
    * Enable xterm mouse reporting + SGR while the side chat is open and route
    * overlay events (wheel scroll, drag-select, copy) to the chat. Mouse
    * sequences are always consumed so they never leak into the editor as
-   * garbage input.
+   * garbage input. (In fullscreen mode the alt-screen handler already
+   * consumed every SGR sequence before us, so this branch only fires in
+   * regular mode.)
    */
   const installMouseHandler = (tui: TUI) => {
     if (removeMouseListener) return;
-    enableMouseReporting(tui.terminal);
+    mouseReportingOwnedByPi = tui.mode === "fullscreen";
     mouseTerminal = tui.terminal;
+    writeMouseReporting(true);
     removeMouseListener = tui.addInputListener((data) => {
       const event = parseSgrMouseEvent(data);
       if (!event) return undefined;
@@ -132,7 +153,7 @@ export default function sideChatExtension(pi: ExtensionAPI) {
     removeMouseListener();
     removeMouseListener = null;
     if (mouseTerminal) {
-      disableMouseReporting(mouseTerminal);
+      writeMouseReporting(false);
       mouseTerminal = null;
     }
   };
@@ -146,12 +167,12 @@ export default function sideChatExtension(pi: ExtensionAPI) {
   const syncMouseReporting = () => {
     if (!removeMouseListener || !mouseTerminal) return;
     if (overlayHandle?.isHidden()) {
-      disableMouseReporting(mouseTerminal);
+      writeMouseReporting(false);
       // Reporting is off, so no release will arrive: abort any in-flight
       // drag so a stale capture cannot swallow later events.
       activeOverlay?.cancelMouseDrag();
     } else {
-      enableMouseReporting(mouseTerminal);
+      writeMouseReporting(true);
     }
   };
 

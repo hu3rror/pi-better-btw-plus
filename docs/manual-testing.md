@@ -94,7 +94,7 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 
 ## F. D11 可配置开关
 
-开关在分层配置的 `features` 块（bundle → `~/.pi/agent/pi-better-btw/config.json` → `<cwd>/.pi/pi-better-btw/config.json`），默认全 `true`。在用户层写：
+开关在分层配置的 `features` 块（bundle → `~/.pi/agent/pi-better-btw/config.json` → `<cwd>/.pi/pi-better-btw/config.json`），默认全 `true`、`fullscreenCopyOnSelect` 例外默认 `false`。在用户层写：
 
 ```json
 { "features": { "rightClickCopyPaste": false } }
@@ -107,12 +107,54 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 | `rightClickCopyPaste` | 有选区右键聊天区不复制；输入框右键不粘贴；`Ctrl+C` 热键仍正常 |
 | `modelSwitch` | `Ctrl+L` 无反应，头部模型不变 |
 | `retry` | 即使 `settings.retry` 开启，瞬时错误直接显示、零退避（等价 D-5） |
+| `fullscreenCopyOnSelect` | 置 `true`：fullscreen 下 fork 区拖选/双击 release 即复制（不消费选区）；置 `false`/默认：release 不复制（H4） |
 
 其它：
 
 - 只覆盖一个键 → 其余开关保持默认开启（如只关 `retry`，右键和 Ctrl+L 仍工作）
 - 非法值（如 `"retry": "disabled"`）→ 忽略，回退默认 `true`
 - 还原配置后重开侧聊 → 行为恢复
+
+## G-fullscreen. fullscreen 模式矩阵（spec #37）
+
+以 **fullscreen 启动 pi**（pi 1.0 默认；不指定 `--tui-mode regular`）逐项检查。
+fork 打开时覆盖的屏幕区 = **fork 区**，其余 = **主区**。预期：fork 区内所有鼠标行为与
+regular 逐位一致；主区由 pi 原生接管。标 `[NEEDS MANUAL VERIFICATION]` 的项为
+自动测试无法覆盖的 pi 侧行为。
+
+### G1. fork 区交互（与 A/B/D 的 regular 结果对照）
+
+| 动作 | 预期 |
+| ---- | ---- |
+| 拖选聊天文字 | 仅选中 fork 文本，**不复制任何内容**（默认） |
+| 双击聊天行 | 选中整渲染行；**剪贴板不含主会话内容**（修复前 bug：双击复制主消息） |
+| 三击 | 选整渲染行（同双击） |
+| 输入框 拖选/双击词/三击行 | 与 regular 一致（反色高亮 + `Ctrl+C` 复制） |
+| 有选区右键聊天区 | 复制选区且保持高亮 |
+| 输入框右键 | 粘贴进 fork 编辑器（win32 不复原到主编辑器） |
+| 滚轮（fork 聚焦或未聚焦） | 都滚动 fork 自身 transcript，主 transcript 不动 |
+| 点 fork 头部/边框 | 无副作用、不产生主区选择 |
+| 拖出 fork 边后松开 | 选区 clamp，不丢失 |
+| 单击 fork 内 | fork 获得焦点（后续键入/复制落在 fork） |
+
+### G2. 主区（fork 打开时）
+
+| 动作 | 预期 |
+| ---- | ---- |
+| 主区可见部分 拖选/双击/右键 | pi 原生行为；若 pi `fullscreenCopyOnSelect` 开启，选择自动复制（fork 区不受影响） |
+
+### G3. Alt+W / 关闭 —— 上报所有权回归 `[NEEDS MANUAL VERIFICATION]`
+
+1. fork 打开 → `Alt+W` 后台化 → 主区 拖选/滚轮/链接 仍工作（pi 鼠标未被杀掉）
+2. 重新显示 fork → 主区鼠标依旧正常
+3. 关闭 fork → 主区鼠标依旧正常（修复前：会杀到重进 alt-screen 才恢复）
+
+### G4. `features.fullscreenCopyOnSelect`（opt-in 镜像）
+
+1. 用户层设 `{ "features": { "fullscreenCopyOnSelect": true } }` → 重开侧聊
+2. fork 区 拖选/双击 → release 即复制（状态行 `✓ Copied N chars`），**高亮保留**
+3. 点按（无拖）→ 不复制
+4. 还原配置 → release 不再复制（默认回到 G1 第一行）
 
 ## G. 回归
 
@@ -130,6 +172,8 @@ while ($l.IsListening) { $c = $l.GetContext(); $c.Response.StatusCode = 503; $c.
 | `Ctrl+L` 打不开 | 流式期间被拒（状态行有提示）；`features.modelSwitch: false` |
 | 无 retry 倒计时 | `settings.retry.enabled: false` 或 `features.retry: false`；错误类别不可重试（溢出/配额/abort） |
 | 剪贴板读不到 | win32 平台通道 `Get-Clipboard -Raw` 不可用且 OSC 52 无回退时的预期行为（`Clipboard read failed`） |
+| fullscreen 双击/拖选复制出主会话内容 | 修复前行为（fork 区无人认领鼠标）；确认加载含 spec #37 的版本，`/reload` 后重开侧聊 |
+| fullscreen 下 Alt+W / 关闭后主区鼠标失效 | 修复前行为（扩展关闭了 pi 的鼠标上报）；同上 |
 
 ---
 

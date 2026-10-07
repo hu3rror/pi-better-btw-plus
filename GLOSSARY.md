@@ -33,13 +33,38 @@ Discard the fork's message history and re-derive it from the main session's curr
 context. Distinct from clearing (Alt+N), which starts an empty fork.
 
 **Overlay**:
-The terminal surface the fork renders on (a bottom band). While visible it enables
-xterm mouse reporting (button + motion + SGR) and consumes every mouse sequence,
-so terminal-native selection and context menus are unavailable inside it.
+The terminal surface the fork renders on (a bottom band) — the component framing
+the header, message area, input editor, and hint bar. Its mouse-interaction
+contract, mode-independent, is the **Fork surface**.
+
+**Fork surface** (fork 表面):
+The screen region the fork covers while visible. Every mouse event inside it
+belongs to the fork — selection, wheel scroll, right-click copy/paste — never to
+the **Pi transcript** beneath, in either mode. Fullscreen dispatches these events
+through pi's component routing; regular mode captures them from the raw xterm
+reporting stream; the surface contract is the same.
+_Avoid_: "the overlay area" (the surface outlives the frame) and "terminal mouse
+consumption" (consumption is a regular-mode mechanism, not the contract).
+
+**Pi transcript** (主内容页):
+The main session's rendered output in pi's own viewport — terminal scrollback in
+regular mode, the alt-screen document in fullscreen mode. The fork never renders
+into it; the **Fork surface** merely covers it. Copying text from it requires
+backgrounding the fork so the surface yields the covered region.
+_Avoid_: "主 agents 的内容页" (ad-hoc; this is the canonical term).
+
+**Mouse reporting ownership** (鼠标上报所有权):
+Which side may enable/disable xterm mouse reporting on the terminal: the extension
+in regular mode (it consumes the raw SGR stream), **pi** in fullscreen mode (it
+owns the stream and routes normalized events through component dispatch). Only the
+owner toggles reporting; the other side must not — the extension disabling
+reporting mid-fullscreen kills pi's own mouse input until the alt screen re-enters.
 
 **Background** (Alt+W):
-Hide the overlay without destroying the fork; releases mouse reporting and restores
-the terminal's native selection behavior.
+Hide the overlay without destroying the fork; the covered region is yielded back
+to the **Pi transcript** and its mouse input reverts to pi's (terminal-native
+selection in regular mode; pi's viewport selection in fullscreen mode). No
+reporting toggle is touched in fullscreen, where pi owns the stream.
 
 **Turn**:
 One user submit through to the agent's finished response. The unit the retry loop

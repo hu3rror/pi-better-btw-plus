@@ -41,9 +41,9 @@ The overlay owns the terminal's mouse while open, so conveniences the main sessi
 | **`Ctrl+C` clear-input parity** | With nothing selected, `Ctrl+C` clears the input box. A successful copy consumes the selection, so the next `Ctrl+C` returns to clearing. |
 | **`Alt+Shift+C` full-draft copy** | Copies the whole draft with paste markers expanded — exactly what a submit would send. Works on terminals without the kitty protocol too. |
 | **Keymap screen** (`Ctrl+O`) | The hint bar shows only the essentials; `Ctrl+O` opens the full keymap, grouped by function. |
-| **Feature kill switches** | `features.rightClickCopyPaste` / `modelSwitch` / `retry` / `editorSelection` turn any of the above off per config layer. |
+| **Feature kill switches** | `features.rightClickCopyPaste` / `modelSwitch` / `retry` / `editorSelection` turn any of the above off per config layer; `fullscreenCopyOnSelect` (default `false`) opts into pi-style copy-on-release inside the fork in fullscreen mode. |
 
-While the overlay is open it consumes every mouse sequence: wheel scrolls, drag selects, right-click copies or pastes. Background it (`Alt+W`) and the mouse returns to the terminal.
+While the overlay is open it owns the mouse over its region: wheel scrolls, drag selects, right-click copies or pastes. Both TUI modes behave identically — fullscreen (default) routes fork-surface events through pi's component dispatch, regular mode captures the raw reporting stream. Background it (`Alt+W`) and the covered region's mouse returns to pi.
 
 ### Input editor selection
 
@@ -97,7 +97,7 @@ In pi's TUI, open the side chat with `/btw` (or the original `/side`) or `Alt+W`
 | User | `~/.pi/agent/pi-better-btw/config.json` |
 | Project | `<project>/.pi/pi-better-btw/config.json` |
 
-- `features` — kill switches, each defaulting to `true`: `rightClickCopyPaste`, `modelSwitch`, `retry`, `editorSelection`.
+- `features` — kill switches: `rightClickCopyPaste`, `modelSwitch`, `retry`, `editorSelection` default to `true`; `fullscreenCopyOnSelect` (spec #37) defaults to `false` and mirrors pi's copy-on-release inside the fork when enabled in fullscreen mode.
 - `readOnlyExtensionAllowlist` — extension tools allowed in the read-only lane. Lists union across layers; the builtin `read`/`grep`/`find`/`ls` and `peek_main` are always included.
 - `readOnlyExtensionAllowlistExclude` — remove bundled defaults.
 - `promptPack` — override any injected prompt (framing, focus anchor, lane reminders) with your own markdown files; missing keys fall back to the bundled `prompts/`.

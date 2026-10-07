@@ -29,6 +29,8 @@ import {
   type Focusable,
   type SelectItem,
   type TUI,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import type { FileActivityTracker } from "./file-activity-tracker.ts";
 import { forkSurgery } from "./fork-surgery.ts";
@@ -43,6 +45,7 @@ import {
 } from "./clipboard-read.ts";
 import { exportChatHistoryToFile } from "./side-chat-export.ts";
 import { type SgrMouseEvent } from "./side-chat-mouse.ts";
+import { translateTuiMouseEvent } from "./tui-mouse-adapter.ts";
 import {
   contentBandPlainLines,
   EditorSelectionState,
@@ -255,6 +258,43 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
   /**
+   * Fullscreen mouse entry (ADR 0012, spec #37): pi's component dispatch
+   * routes every event inside the fork surface here. The region-consumption
+   * invariant — a non-undefined result for every dispatched event — is what
+   * keeps pi's own Pi-transcript selection from ever starting in-region
+   * (the pre-fix bug: double-click copied main-agent content). Events
+   * translate into the SGR vocabulary the classifier already speaks;
+   * `render` is always suppressed because the action layer requests its own
+   * (throttled) paints, and pi's per-event render default would defeat the
+   * 32ms drag coalescing.
+   */
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    // Defensive gate: only the fullscreen alt-screen dispatches component
+    // mouse events; regular mode routes raw SGR through handleMouseEvent.
+    if (this.options.tui.mode !== "fullscreen") return undefined;
+    const translated = translateTuiMouseEvent(event);
+    if (translated) this.handleMouseEvent(translated);
+    // Copy-on-select mirror (spec #37, story #18): when opted in, a left
+    // release that just formed a selection copies it WITHOUT consuming it —
+    // the highlight stays, like pi's fullscreenCopyOnSelect. Default off
+    // (story #17): gestures never touch the clipboard on their own.
+    if (
+      event.type === "release" &&
+      event.button === "left" &&
+      this.options.features.fullscreenCopyOnSelect
+    ) {
+      this.copySelectionWithoutConsuming();
+    }
+    // focus: a left press focuses the fork (left only, regular-mode parity —
+    // right presses never yank focus); capture: an in-flight left drag keeps
+    // selecting (clamped at the edge) even when the pointer leaves the fork.
+    if (event.type === "press" && event.button === "left") {
+      return { handled: true, focus: true, capture: true, render: false };
+    }
+    return { handled: true, render: false };
+  }
+
+  /**
    * Translate a gesture action onto the message store + render loop (spec
    * #13, D6). select always updates the selection; only paint:true actions
    * request a re-render (the 32ms drag throttle lives in the module).
@@ -336,6 +376,25 @@ export class SideChatOverlay implements Component, Focusable {
       this.options.tui.requestRender();
     }
     return ok;
+  }
+
+  /**
+   * Copy the active selection without consuming it (spec #37, story #18):
+   * the opt-in fullscreen copy-on-select mirror. Same chat-first priority as
+   * hotkey copy, but the highlight survives so the user sees what just
+   * landed in the clipboard. No-op when neither surface holds a selection
+   * (e.g. a plain click release).
+   */
+  private copySelectionWithoutConsuming(): void {
+    if (this.messages.hasSelection()) {
+      const text = this.messages.getSelectedText();
+      if (text) void this.copyTextWithFeedback(text);
+      return;
+    }
+    if (this.editorSelection.hasSelection()) {
+      const text = this.editorSelection.selectedText(this.editorPlainLines);
+      if (text) void this.copyTextWithFeedback(text);
+    }
   }
 
   /**

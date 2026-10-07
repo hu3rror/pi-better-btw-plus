@@ -33,7 +33,7 @@ const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/;
 export const WHEEL_UP_BUTTON = 64;
 export const WHEEL_DOWN_BUTTON = 65;
 /** SGR motion flag: drag events are reported as (button | 32). */
-const MOTION_FLAG = 32;
+export const MOTION_FLAG = 32;
 
 export function enableMouseReporting(terminal: Terminal): void {
   terminal.write(MOUSE_ENABLE);

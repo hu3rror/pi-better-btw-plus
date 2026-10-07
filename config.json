@@ -19,6 +19,7 @@
     "rightClickCopyPaste": true,
     "modelSwitch": true,
     "retry": true,
-    "editorSelection": true
+    "editorSelection": true,
+    "fullscreenCopyOnSelect": false
   }
 }
