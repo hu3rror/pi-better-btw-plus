@@ -60,7 +60,7 @@ pi install npm:pi-better-btw-plus
 pi TUI 中用 `/btw`（或原名 `/side`）或 `Alt+W` 打开。提问、`Enter` 发送、`Esc` 关闭；重新打开继续同一段对话。
 
 > [!NOTE]
-> 已验证与 pi `1.0.2` 兼容。
+> 已验证与 pi `1.1.0` 兼容。
 
 ## 快捷键
 

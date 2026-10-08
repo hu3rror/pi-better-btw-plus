@@ -5,7 +5,7 @@
  * The write side is pi's own `copyToClipboard` (public export); the read side
  * is self-built because `readClipboardText` is not re-exported from the
  * package entry. The PRIMARY channel reads through pi-tui's
- * `getNativeClipboard()` (pi 1.0.2's bundled native helper — the same one
+ * `getNativeClipboard()` (pi 1.1.0's bundled native helper — the same one
  * the main session's `readClipboardText` uses); the remaining channels —
  * PowerShell `Get-Clipboard -Raw` (win32), `pbpaste` (darwin), and an OSC 52
  * query — are extension-only fallbacks pi's read side does not have:
@@ -176,7 +176,7 @@ function makeCommandChannel(
 export type NativeClipboardReader = Pick<NativeClipboard, "getText">;
 
 /**
- * Delegate loader: pi-tui's `getNativeClipboard()` (pi 1.0.2), the bundled
+ * Delegate loader: pi-tui's `getNativeClipboard()` (pi 1.1.0), the bundled
  * native clipboard helper the main session's `readClipboardText` uses too.
  * It caches helper loading internally and resolves to undefined (never
  * throws) when the platform/arch has no bundled helper — linux without

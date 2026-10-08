@@ -645,7 +645,7 @@ export class SideChatOverlay implements Component, Focusable {
     // assembles the deps: agent options (initial state: fork surgery +
     // framing block + read-only tool list, streamFn = the model registry's
     // streamSimple — auth resolves inside the runtime at request time
-    // (apiKey/OAuth/baseUrl, pi 1.0.2 parity; no hand-wired getApiKey) —
+    // (apiKey/OAuth/baseUrl, pi 1.1.0 parity; no hand-wired getApiKey) —
     // wrapped with pi's provider-layer retry settings — spec #20 D5: NOT
     // gated by features.retry / retry.enabled, mirroring the main session),
     // features-ANDed retry policy (D11), the prompt pack, the live lane
