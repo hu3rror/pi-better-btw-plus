@@ -24,8 +24,8 @@ Single-context: `GLOSSARY.md` at the repo root + `docs/adr/`. See `docs/agents/d
 
 ### Releases
 
-发布走 **Trusted Publisher(OIDC)暂存流**（`.github/workflows/publish.yml`，零 token）：push `v*` tag 触发 CI（bun install --frozen-lockfile → bun run test → tag↔version 校验 → `npm stage publish --provenance`），包进入 npmjs 暂存区并自动生成 provenance。
-Agent 负责 bump 版本、commit、打 annotated tag（`git tag -a vX.Y.Z -m "vX.Y.Z"`，需与 package.json version 一致）、push（`git push origin main` + `git push origin refs/tags/vX.Y.Z`，受限操作需当轮授权），然后停下交还。
-**发布闸门**：维护者本地 `npm stage approve <stage-id>`（2FA）后才真正发布；stage-id 从 CI 日志的 Stage 步骤取。错误回滚用 `npm stage reject <stage-id>`。`npm publish` 由维护者亲自执行，Agent 不代跑。
-**发布说明**：GitHub Release 由 agent 在维护者 approve 发布后撰写——按 Features / Fixes / Docs-Chore 分类整理，而不是只留 workflow 的 `--generate-notes` 比较链接；模式 A 下 workflow 不自动建 Release。
-同版本重复暂存会被拒（semver 唯一索引），需先 `npm stage reject` 清掉旧暂存或换新版本号。
+发布走 **Trusted Publisher(OIDC)直接流**（`.github/workflows/publish.yml`，零 token）：push `v*` tag 触发 CI（bun install --frozen-lockfile → bun run test → tag↔version 校验 → `npm publish --provenance`），**tag push 即发布，全自动，无人工 2FA 闸门**。
+Agent 负责 bump 版本、commit、打 annotated tag（`git tag -a vX.Y.Z -m "vX.Y.Z"`，需与 package.json version 一致）、push（`git push origin main` + `git push origin refs/tags/vX.Y.Z`，受限操作需当轮授权）。
+**发布闸门**：无——CI 经 OIDC 直接发布；错误回滚用 `npm unpublish <version>`（72 小时内，需本地登录态；超期 `npm deprecate`）。前置：npmjs.com 的 Trusted Publisher Allowed actions 需允许 `npm publish`（只允许 stage 会 403）。
+**发布说明**：GitHub Release 由 agent 在发布后撰写——按 Features / Fixes / Docs-Chore 分类整理（`gh release create` 手动建），而不是只留 workflow 的 `--generate-notes` 比较链接；workflow 不自动建 Release。
+同版本重复发布会被拒（semver 唯一索引），需换新版本号。
