@@ -15,20 +15,17 @@
  * `EditorSelectionState` holder and `decorateEditorSelection` into `render()`.
  */
 /**
- * pi-tui's private word-navigation helpers — the Editor widget's own word-jump
- * semantics (`findWordBackward` / `findWordForward` + `WordNavigationOptions`
- * `{ segment, isAtomicSegment }`), verified against pi-tui 1.3.0
- * (`dist/word-navigation.d.ts`, devDep and runtime). Only the paste-marker
- * atomic-segment option is used; call sites pass WORD_NAV_OPTIONS below.
+ * Local copy of pi-tui's word navigation semantics.
  *
- * SWAP POINT: if pi ever exposes word navigation on the package entry (or the
- * Editor API), replace this deep import with the public export — the
- * wordSelection tests keep guarding the behavior either way.
+ * Pi provides host packages through loader aliases, but does not alias deep
+ * imports such as `@earendil-works/pi-tui/dist/word-navigation.js`. Keeping
+ * this small pure helper local avoids depending on an internal host path while
+ * preserving the editor's word-selection behavior.
  */
 import {
   findWordBackward,
   findWordForward,
-} from "@earendil-works/pi-tui/dist/word-navigation.js";
+} from "./word-navigation.ts";
 import {
   sliceByColumn,
   stripTerminalSequences,
