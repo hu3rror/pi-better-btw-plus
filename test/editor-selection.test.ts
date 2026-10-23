@@ -1,9 +1,3 @@
-/**
- * Unit tests for the editor-selection pure module (spec #24 T1, issue #25):
- * a zero-TUI visual-space selection holder for the input editor. Asserts the
- * external behaviors only — highlight ranges, copy text, word/line resolution,
- * paste-marker clipping, and the render post-processor — not internal fields.
- */
 import { describe, expect, test } from "bun:test";
 import {
   EditorSelectionState,
@@ -25,7 +19,6 @@ const sel = (anchor: [number, number], focus: [number, number]): EditorSelection
   focus: { line: focus[0], col: focus[1] },
 });
 
-/** Build a minimal `Editor.render(width)` output: top border, padded band, bottom border. */
 function renderedBand(lines: string[], width: number): string[] {
   const top = "─".repeat(width);
   return [top, ...lines.map((l) => l + " ".repeat(Math.max(0, width - visibleWidth(l)))), top];
@@ -186,8 +179,6 @@ describe("wordSelection", () => {
 
   test("a word next to a marker never selects the marker", () => {
     const line = "a [paste #1 5 chars] b";
-    // Click on the space after "a" (col 1): the raw word jump spans the marker,
-    // but clipping keeps only "a ".
     expect(wordSelection([line], 0, 1)).toEqual(sel([0, 0], [0, 2]));
   });
 
@@ -212,7 +203,6 @@ describe("decorateEditorSelection", () => {
     expect(out[0]).toBe("──────");
     expect(out[2]).toBe("──────");
     expect(out[1]).toContain("\x1b[7mell\x1b[27m");
-    // Re-padded to the original content width, ANSI stripped = "hello ".
     expect(stripTerminalSequences(out[1])).toBe("hello ");
     expect(visibleWidth(out[1])).toBe(6);
   });

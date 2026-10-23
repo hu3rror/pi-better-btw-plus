@@ -1,9 +1,3 @@
-/**
- * Turn-level retry engine (issue #6): pure classifier + injectable retry
- * loop unit tests. The engine is decoupled from the overlay/TUI — a fake
- * agent (scripted attempt results) and a fake clock (recorded delays) drive
- * every scenario; the abort signal stands in for Esc cancellation.
- */
 import { describe, expect, test } from "bun:test";
 import {
   classifyRetryable,
@@ -13,7 +7,6 @@ import {
   type RetryPolicy,
 } from "../srcs/retry.ts";
 
-// --- Fixtures ---------------------------------------------------------------
 
 const err = (errorMessage: string) => ({ stopReason: "error", errorMessage });
 const ok = () => ({ stopReason: "stop", content: [] });
@@ -22,7 +15,6 @@ const aborted = (errorMessage = "cancelled") => ({
   errorMessage,
 });
 
-/** Resolve-immediately fake clock that records every requested delay. */
 function fakeDelay(record: number[]): (ms: number) => Promise<void> {
   return async (ms) => {
     record.push(ms);
@@ -36,11 +28,6 @@ interface RunOutcome {
   result: unknown;
 }
 
-/**
- * Drive runWithRetry with a scripted fake agent. `results` are served in
- * order; the last one repeats once the list is exhausted (so a single
- * always-fail entry keeps failing).
- */
 async function run(
   results: unknown[],
   options: {
@@ -78,18 +65,13 @@ async function run(
   return { attempts, delays, notices, result };
 }
 
-// --- classifyRetryable --------------------------------------------------------
 
 describe("classifyRetryable", () => {
   test("transient provider errors are retryable (overloaded / rate limit / 5xx)", () => {
     const retryable = [
       "The model is overloaded, please try again later",
       "The model is currently experiencing high demand",
-      // pi 1.0.1 (issue #10278): "Selected model is at capacity" is retried
-      // instead of ending the turn.
       "Selected model is at capacity",
-      // pi 1.1.0 (issue #10543): "server_busy" / "servers are currently
-      // busy" provider errors are retried instead of ending the turn.
       "server_busy",
       "servers are currently busy",
       "rate limit reached, slow down",
@@ -103,14 +85,8 @@ describe("classifyRetryable", () => {
       "upstream service unavailable",
       "internal server error",
       "Provider returned error",
-      // pi 1.3.0 (issue #10842): "The upstream provider returned an error"
-      // is retried as a transient provider error.
       "The upstream provider returned an error",
-      // pi 1.3.0 (issue #10965): "The service is temporarily unavailable"
-      // is retried instead of ending the turn.
       "The service is temporarily unavailable",
-      // pi 1.3.0 (issue #10920): gateway failure relaying the upstream
-      // response stream (OpenAI Responses response.failed) is retried.
       "Unable to forward upstream stream",
       "network error while talking to upstream",
       "connection refused",
@@ -122,19 +98,12 @@ describe("classifyRetryable", () => {
       "request timeout",
       "websocket closed unexpectedly",
       "stream ended before message_stop",
-      // pi 1.4.0 (issue #11057): Codex CLI mid-stream disconnect relayed by
-      // proxies wrapping the Codex CLI is retried.
       "stream disconnected before completion: stream closed before response.completed",
-      // pi 1.4.0 (issue #10920): gateway upstream failures relayed as
-      // `response.failed` error codes are retried.
       "upstream request failed",
       "upstream_stream_read_error",
       "stream was interrupted",
       "http/2 stream failed",
-      // pi 1.4.0 (issue #10996): node-fetch system errors, e.g. the Google
-      // ADC OAuth token refresh, are retried (the reason is often empty).
       "request to https://oauth2.googleapis.com/token failed, reason: connect ETIMEDOUT",
-      // pi 1.1.0 (issue #10379): Bedrock HTTP/2 stream cancel is retried.
       "pending stream has been canceled",
     ];
     for (const message of retryable) {
@@ -154,7 +123,6 @@ describe("classifyRetryable", () => {
     ]) {
       expect(classifyRetryable(err(message))).toBe(false);
     }
-    // Standalone status codes still match.
     expect(classifyRetryable(err("429 Too Many Requests"))).toBe(true);
     expect(classifyRetryable(err("500 Internal Server Error"))).toBe(true);
   });
@@ -167,11 +135,7 @@ describe("classifyRetryable", () => {
       "billing error on your account",
       "Monthly usage limit reached",
       "GoUsageLimitError: free tier exhausted",
-      // Sign in with ChatGPT (pi 1.1.0 retry.js): the subscription's shared
-      // usage limit, which resets after hours rather than seconds.
       "subscription_sharing_usage_limit_exceeded",
-      // Sign in with ChatGPT on a ChatGPT Business plan (pi 1.4.0 retry.js):
-      // an admin-set workspace usage limit is never retried.
       "subscription_sharing_workplace_individual_usage_limit_exceeded",
     ];
     for (const message of nonRetryable) {
@@ -182,9 +146,9 @@ describe("classifyRetryable", () => {
   test("context overflow is not retryable", () => {
     const overflow = [
       "prompt is too long: 213462 tokens > 200000 maximum",
-      "prompt too long", // bare z.ai wording (no "is")
+      "prompt too long",
       "Prompt too long",
-      '{"code":"1261","message":"Prompt too long"}', // z.ai JSON error body
+      '{"code":"1261","message":"Prompt too long"}',
       "413 {\"error\":{\"type\":\"request_too_large\"}}",
       "Your input exceeds the context window of this model",
       "Requested token count exceeds the model's maximum context length of 131072 tokens",
@@ -199,7 +163,6 @@ describe("classifyRetryable", () => {
       "context length exceeded",
       "invalid params, context window exceeds limit",
       "Prompt has 300000 tokens, but the configured context size is 200000 tokens",
-      // z.ai CN endpoint (pi 1.1.0 overflow.js): token overflow wording.
       '{"code":"1261","message":"Prompt exceeds max length"}',
       "Prompt exceeds max length",
     ];
@@ -209,17 +172,11 @@ describe("classifyRetryable", () => {
   });
 
   test("z.ai bare wording via an Error normalization path is never retried", () => {
-    // The bare-wording strings already sit in the "context overflow" list;
-    // this only pins the Error normalization path for z.ai style text.
     expect(classifyRetryable(new Error("Prompt too long"))).toBe(false);
     expect(classifyRetryable(new Error('{"code":"1261","message":"Prompt too long"}'))).toBe(false);
   });
 
   test("overflow wording wins over retryable wording (checked first, pi order)", () => {
-    // The z.ai overflow text embedded in a message that also matches a
-    // retryable pattern ("500") must classify as overflow — never retried,
-    // mirroring pi's publishResponse where the overflow branch precedes the
-    // retryable branch.
     for (const message of [
       "Prompt too long, 500 Internal Server Error",
       "500 Internal Server Error: Prompt too long",
@@ -230,8 +187,6 @@ describe("classifyRetryable", () => {
   });
 
   test("rate-limit text is excluded from overflow detection (NON_OVERFLOW)", () => {
-    // "token limit exceeded" matches an overflow pattern, but the 429
-    // "too many requests" prefix marks it as throttling → retryable.
     expect(
       classifyRetryable(
         err("429 Too Many Requests: token limit exceeded, please retry your request"),
@@ -271,14 +226,11 @@ describe("classifyRetryable", () => {
       stopReason: "stop",
       usage: { input: 200000, cacheRead: 0, output: 0 },
     };
-    // Not retryable regardless (a non-error result never is), matching pi's
-    // _isRetryableError which checks isContextOverflow first.
     expect(classifyRetryable(silentOverflow, 128000)).toBe(false);
     expect(classifyRetryable(silentOverflow)).toBe(false);
   });
 });
 
-// --- runWithRetry --------------------------------------------------------------
 
 describe("runWithRetry", () => {
   test("success on the first attempt: no backoff, no status", async () => {
@@ -315,7 +267,6 @@ describe("runWithRetry", () => {
     });
     expect(outcome.result).toBe(success);
     expect(outcome.attempts).toEqual([f1, f2, success]);
-    // baseDelayMs * 2^(n-1): 1000, 2000.
     expect(outcome.delays).toEqual([1000, 2000]);
     expect(outcome.notices.map((n) => n.attempt)).toEqual([1, 2]);
     expect(outcome.notices.map((n) => n.maxAttempts)).toEqual([3, 3]);
@@ -329,7 +280,6 @@ describe("runWithRetry", () => {
   test("budget exhausted returns the final error", async () => {
     const f = err("overloaded");
     const outcome = await run([f], { policy: { maxRetries: 3, baseDelayMs: 1000 } });
-    // 1 original attempt + 3 retries.
     expect(outcome.attempts).toHaveLength(4);
     expect(outcome.result).toBe(f);
     expect(outcome.delays).toEqual([1000, 2000, 4000]);
@@ -341,7 +291,6 @@ describe("runWithRetry", () => {
     const outcome = await run([f], {
       policy: { maxRetries: 5, baseDelayMs: 1000, maxAgentDelayMs: 2000 },
     });
-    // 1000, then 2000, 4000, 8000, 16000 all capped to 2000.
     expect(outcome.delays).toEqual([1000, 2000, 2000, 2000, 2000]);
     expect(outcome.notices.map((n) => n.delayMs)).toEqual([1000, 2000, 2000, 2000, 2000]);
   });
@@ -357,8 +306,6 @@ describe("runWithRetry", () => {
   test("cancel during the backoff wait returns the last error without more attempts", async () => {
     const ctrl = new AbortController();
     const f = err("overloaded");
-    // The fake clock aborts the signal and then resolves: the engine must
-    // notice the cancellation right after the wait and stop.
     const outcome = await run([f], {
       signal: ctrl.signal,
       delay: async () => {
@@ -375,7 +322,6 @@ describe("runWithRetry", () => {
     ctrl.abort();
     const f = err("overloaded");
     const outcome = await run([f], { signal: ctrl.signal });
-    // First turn runs; the already-aborted signal then suppresses retries.
     expect(outcome.attempts).toHaveLength(1);
     expect(outcome.result).toBe(f);
     expect(outcome.delays).toEqual([]);
@@ -395,7 +341,6 @@ describe("runWithRetry", () => {
     const f = err("overloaded");
     const outcome = await run([f], {
       policy: { enabled: false },
-      // Neither the classifier nor the clock may be touched.
       classify: () => {
         throw new Error("classify must not run when retry is disabled");
       },
@@ -419,7 +364,6 @@ describe("runWithRetry", () => {
   });
 });
 
-// --- sleep (the real default clock) ---------------------------------------------
 
 describe("sleep", () => {
   test("resolves after its delay", async () => {

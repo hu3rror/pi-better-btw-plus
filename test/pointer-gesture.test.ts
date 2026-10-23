@@ -1,10 +1,3 @@
-/**
- * Unit tests for the pointer gesture state machine (spec #12/#13, #24/#26):
- * feed SGR event sequences through a `PointerGesture` with a fake `PointerHit`
- * and assert the produced `GestureAction[]` sequences. The module has no TUI
- * dependency, so no terminal mock is needed — the fake hit queries model the
- * chat/editor geometry and the two selection stores (chat + editor surfaces).
- */
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   PointerGesture,
@@ -23,7 +16,6 @@ const EDITOR_TOP = 13;
 const EDITOR_HEIGHT = 3;
 const EDITOR_WIDTH = 100;
 
-/** Mirrors the overlay's hit queries over the fake layout (both surfaces). */
 class FakeHit implements PointerHit {
   selection: { anchor: CellPos; focus: CellPos } | null = null;
   editorSelection: { anchor: EditorPos; focus: EditorPos } | null = null;
@@ -77,7 +69,6 @@ class FakeHit implements PointerHit {
   }
 }
 
-/** Mirrors the overlay's applyGestureAction for the select/selectLine stores. */
 function apply(fake: FakeHit, actions: GestureAction[]): void {
   for (const action of actions) {
     if (action.kind === "select") {
@@ -95,12 +86,9 @@ function apply(fake: FakeHit, actions: GestureAction[]): void {
       if (action.surface === "chat") fake.selection = selection;
       else fake.editorSelection = selection;
     }
-    // selectWord: word bounds are resolved by the overlay (T4), not the
-    // module; the fake records no store state for it — tests assert the action.
   }
 }
 
-/** Feed events and return the action list each produced (store kept in sync). */
 function feed(
   g: PointerGesture,
   fake: FakeHit,
@@ -192,7 +180,6 @@ describe("pointer-gesture.ts", () => {
     };
   };
 
-  // --- chat surface (spec #12/#13, regression) ---
 
   test("left press seeds an empty selection with paint", () => {
     const { gesture, fake } = makeGesture();
@@ -214,9 +201,9 @@ describe("pointer-gesture.ts", () => {
     feed(gesture, fake, press(CHAT_COL, CHAT_ROW));
     clock = 40;
     const [first] = feed(gesture, fake, drag(CHAT_COL + 5, CHAT_ROW));
-    clock = 50; // 10ms after the last paint → throttled
+    clock = 50;
     const [second] = feed(gesture, fake, drag(CHAT_COL + 6, CHAT_ROW));
-    clock = 90; // 40ms after the last paint → paints again
+    clock = 90;
     const [third] = feed(gesture, fake, drag(CHAT_COL + 7, CHAT_ROW));
     expect(first).toEqual([
       {
@@ -266,7 +253,6 @@ describe("pointer-gesture.ts", () => {
   test("release reads the anchor back from the store (window-shifted anchor)", () => {
     const { gesture, fake } = makeGesture();
     feed(gesture, fake, press(CHAT_COL, CHAT_ROW));
-    // A status append shifted the window: the store's anchor moved with it.
     fake.selection!.anchor = { line: 2, col: 18 };
     const [actions] = feed(gesture, fake, drag(CHAT_COL + 5, CHAT_ROW));
     expect(actions[0]).toMatchObject({
@@ -304,9 +290,6 @@ describe("pointer-gesture.ts", () => {
   });
 
   test("a drag release within the same-line tolerance is a click, so the next press double-clicks", () => {
-    // Real terminals report motion even for 1-cell hand shake; a selection
-    // that small must not mark the release as a drag (bug: line-select never
-    // fired before the tolerance existed).
     const { gesture, fake } = makeGesture();
     feed(
       gesture,
@@ -333,15 +316,13 @@ describe("pointer-gesture.ts", () => {
     clock = 10;
     feed(gesture, fake, press(CHAT_COL, CHAT_ROW));
     const [releaseActions] = feed(gesture, fake, release(CHAT_COL, CHAT_ROW));
-    // The release one line down was a real drag, so this quick press is a
-    // plain press and the release must NOT select the whole line.
     expect(releaseActions).toEqual([]);
   });
 
   test("drag beyond the viewport clamps to the last line", () => {
     const { gesture, fake } = makeGesture();
     feed(gesture, fake, press(CHAT_COL, CHAT_ROW));
-    clock = 40; // a real drag takes time; a same-ms motion is throttled
+    clock = 40;
     const [actions] = feed(gesture, fake, drag(CHAT_COL, 40));
     expect(actions).toEqual([
       {
@@ -356,7 +337,7 @@ describe("pointer-gesture.ts", () => {
 
   test("a press on the header does not start a drag", () => {
     const { gesture, fake } = makeGesture();
-    const [actions] = feed(gesture, fake, press(16, 2)); // 0-based row 1 (header)
+    const [actions] = feed(gesture, fake, press(16, 2));
     expect(actions).toEqual([]);
     expect(gesture.isDragging()).toBe(false);
   });
@@ -372,7 +353,7 @@ describe("pointer-gesture.ts", () => {
 
   test("right press+release over the editor pastes", () => {
     const { gesture, fake } = makeGesture();
-    const editorRow = EDITOR_TOP + 2; // 0-based 14 → 1-based 15
+    const editorRow = EDITOR_TOP + 2;
     const [pressActions] = feed(gesture, fake, rightPress(20, editorRow));
     const [releaseActions] = feed(gesture, fake, rightRelease(20, editorRow));
     expect(pressActions).toEqual([]);
@@ -383,10 +364,8 @@ describe("pointer-gesture.ts", () => {
     const { gesture, fake } = makeGesture();
     fake.selection = { anchor: { line: 0, col: 0 }, focus: { line: 0, col: 5 } };
     const editorRow = EDITOR_TOP + 2;
-    // press in the chat, release over the editor → no copy
     const [a] = feed(gesture, fake, rightPress(20, CHAT_ROW), rightRelease(20, editorRow));
     expect(a).toEqual([]);
-    // press over the editor, release in the chat → no paste
     const [b] = feed(gesture, fake, rightPress(20, editorRow), rightRelease(20, CHAT_ROW));
     expect(b).toEqual([]);
   });
@@ -448,8 +427,6 @@ describe("pointer-gesture.ts", () => {
     const [actions] = feed(gesture, fake, release(CHAT_COL, CHAT_ROW));
     expect(actions).toEqual([]);
     expect(gesture.isDragging()).toBe(false);
-    // A fresh press afterwards works normally: the stale release must not
-    // have swallowed the gesture stream.
     const [rePress] = feed(gesture, fake, press(CHAT_COL, CHAT_ROW));
     expect(rePress).toEqual([
       {
@@ -463,7 +440,6 @@ describe("pointer-gesture.ts", () => {
     expect(gesture.isDragging()).toBe(true);
   });
 
-  // --- editor surface (spec #24/#26) ---
 
   test("editor left press seeds an empty editor selection (surface editor)", () => {
     const { gesture, fake } = makeGesture();
@@ -484,7 +460,7 @@ describe("pointer-gesture.ts", () => {
     const { gesture, fake } = makeGesture();
     feed(gesture, fake, press(EDITOR_COL, EDITOR_ROW));
     clock = 40;
-    const [actions] = feed(gesture, fake, drag(EDITOR_COL + 5, 40)); // 0-based col 24, row 39 (off-band)
+    const [actions] = feed(gesture, fake, drag(EDITOR_COL + 5, 40));
     expect(actions).toEqual([
       {
         kind: "select",
@@ -543,7 +519,7 @@ describe("pointer-gesture.ts", () => {
     const { gesture, fake } = makeGesture();
     feed(gesture, fake, press(EDITOR_COL, EDITOR_ROW), release(EDITOR_COL, EDITOR_ROW));
     clock = 10;
-    feed(gesture, fake, press(EDITOR_COL + 10, EDITOR_ROW)); // 10 cells away
+    feed(gesture, fake, press(EDITOR_COL + 10, EDITOR_ROW));
     const [releaseActions] = feed(gesture, fake, release(EDITOR_COL + 10, EDITOR_ROW));
     expect(releaseActions).toEqual([]);
   });
@@ -554,7 +530,7 @@ describe("pointer-gesture.ts", () => {
       gesture,
       fake,
       press(EDITOR_COL, EDITOR_ROW),
-      drag(EDITOR_COL + 5, EDITOR_ROW + 1), // cross-line drag
+      drag(EDITOR_COL + 5, EDITOR_ROW + 1),
       release(EDITOR_COL + 5, EDITOR_ROW + 1),
     );
     clock = 10;

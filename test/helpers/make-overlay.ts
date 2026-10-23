@@ -1,17 +1,5 @@
-/**
- * Shared side-chat overlay test harness: builds a `SideChatOverlay` against a
- * mocked TUI/theme with the same options every overlay suite uses, and seeds
- * it with default messages + one render (geometry needed by mouse tests).
- *
- * The overlay constructor is passed in rather than statically imported so each
- * test file keeps control of its `mock.module` ordering — the overlay must
- * load only after the clipboard mocks are registered (see clipboard-mock.ts /
- * clipboard-read-mock.ts), which top-level `await import(...)` calls in the
- * test file guarantee.
- */
 import type { SideChatOverlay as SideChatOverlayType } from "../../srcs/side-chat-overlay.ts";
 
-/** Width the overlay would compute for 120 columns (floor(120*0.85) = 102). */
 export const OVERLAY_TEST_WIDTH = 102;
 
 /** Frame text of the overlay's current render (the mock theme emits no ANSI). */

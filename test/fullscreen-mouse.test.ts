@@ -1,16 +1,3 @@
-/**
- * Fullscreen mouse entry integration tests (ADR 0012, spec #37): in fullscreen
- * mode pi's component dispatch routes every fork-surface mouse event to
- * `SideChatOverlay.handleMouse`; this suite drives that entry with pi-style
- * `TuiMouseEvent`s (0-based absolute coords) and asserts — through the same
- * make-overlay seam as select/editor-selection suites — that the fork surface
- * behaves identically to the regular-mode SGR path: drag / double / triple /
- * right-click / wheel semantics, the region-consumption invariant (every
- * event handled, so pi's own Pi-transcript selection never starts in-region),
- * focus/capture only on left press, and — the regression this adapts for — a
- * gesture never copies anything on its own (no Pi-transcript leak; copy stays
- * hotkey/right-click only).
- */
 import { describe, expect, test } from "bun:test";
 import type { TuiMouseButton, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { makeOverlay as sharedMakeOverlay, OVERLAY_TEST_WIDTH } from "./helpers/make-overlay.ts";
@@ -24,7 +11,6 @@ const { setClipboardReadResult } = await import("./helpers/clipboard-read-mock.t
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
 
 type Overlay = InstanceType<typeof SideChatOverlay>;
-/** Overlay harness with a fullscreen-mode mock TUI (reporting owned by pi). */
 const makeOverlay = (messages?: any[], overrides: Record<string, unknown> = {}) =>
   sharedMakeOverlay(SideChatOverlay, messages, {
     tui: {
@@ -65,7 +51,6 @@ function ev(
   };
 }
 
-/** Sequence pi dispatches for one clean click: press, release, click. */
 function click(overlay: Overlay, row: number, col: number, times = 1): void {
   for (let n = 0; n < times; n++) {
     overlay.handleMouse(ev("press", "left", row, col));
@@ -74,7 +59,6 @@ function click(overlay: Overlay, row: number, col: number, times = 1): void {
   }
 }
 
-/** Sequence for a left drag: press, drag, release (+ absorbed click). */
 function drag(overlay: Overlay, row: number, fromCol: number, toCol: number): void {
   overlay.handleMouse(ev("press", "left", row, fromCol));
   overlay.handleMouse(ev("drag", "left", row, toCol));
@@ -100,15 +84,13 @@ describe("fullscreen mouse entry (handleMouse)", () => {
     const overlay = makeOverlay();
     const result = overlay.handleMouse(ev("press", "left", 5, 19));
     expect(result).toEqual({ handled: true, focus: true, capture: true, render: false });
-    expect((overlay as any).messages.hasSelection()).toBe(false); // press alone: empty range
+    expect((overlay as any).messages.hasSelection()).toBe(false);
   });
 
   test("drag-select + hotkey copy matches regular mode; gestures never copy on their own", async () => {
     const overlay = makeOverlay();
     drag(overlay, 5, 19, 24);
     await tick();
-    // The gesture selected but copied nothing by itself (the pre-fix bug was
-    // auto-copying Pi-transcript content on selection — here: no copy at all).
     expect(copiedTexts().length).toBe(0);
     expect((overlay as any).messages.hasSelection()).toBe(true);
     overlay.handleInput("\x03");
@@ -118,10 +100,10 @@ describe("fullscreen mouse entry (handleMouse)", () => {
 
   test("double-click over the chat selects a whole rendered line without copying", async () => {
     const overlay = makeOverlay();
-    click(overlay, 5, 19, 2); // double-click (press/release/click × 2)
+    click(overlay, 5, 19, 2);
     await tick();
     expect((overlay as any).messages.hasSelection()).toBe(true);
-    expect(copiedTexts().length).toBe(0); // regression: no copy-on-select
+    expect(copiedTexts().length).toBe(0);
     overlay.handleInput("\x03");
     await tick();
     expect(copiedTexts()[0]).toContain("hello world this is a long message");
@@ -132,14 +114,14 @@ describe("fullscreen mouse entry (handleMouse)", () => {
     seedEditor(overlay, "select me please");
     const { row, col } = editorOrigin(overlay);
 
-    click(overlay, row, col + 13, 2); // double-click mid-word: "please"
+    click(overlay, row, col + 13, 2);
     await tick();
-    expect(copiedTexts().length).toBe(0); // still no auto-copy
+    expect(copiedTexts().length).toBe(0);
     overlay.handleInput("\x03");
     await tick();
     expect(copiedTexts()[0]).toBe("please");
 
-    click(overlay, row, col, 3); // triple-click
+    click(overlay, row, col, 3);
     await tick();
     overlay.handleInput("\x03");
     await tick();
@@ -177,13 +159,12 @@ describe("fullscreen mouse entry (handleMouse)", () => {
     ]);
     const messages: any = (overlay as any).messages;
     expect(messages.getScrollOffset()).toBe(0);
-    overlay.handleMouse(ev("wheel", "none", 5, 60, { wheelDelta: -3 })); // scroll up
+    overlay.handleMouse(ev("wheel", "none", 5, 60, { wheelDelta: -3 }));
     expect(messages.getScrollOffset()).toBeGreaterThan(0);
   });
 
   test("an in-flight drag past the fork edge keeps selecting (clamped)", async () => {
     const overlay = makeOverlay();
-    // Release lands far outside the chat band; the drag clamps instead of dropping.
     drag(overlay, 5, 19, 24);
     overlay.handleMouse(ev("press", "left", 5, 19));
     overlay.handleMouse(ev("drag", "left", 5, 40));
@@ -209,7 +190,7 @@ describe("fullscreen mouse entry (handleMouse)", () => {
 
   test("clicks on the header/border are consumed without starting anything", () => {
     const overlay = makeOverlay();
-    const result = overlay.handleMouse(ev("press", "left", 2, 60)); // header row
+    const result = overlay.handleMouse(ev("press", "left", 2, 60));
     expect(result).toEqual({ handled: true, focus: true, capture: true, render: false });
     expect((overlay as any).messages.hasSelection()).toBe(false);
   });
@@ -227,7 +208,7 @@ describe("fullscreen mouse entry (handleMouse)", () => {
   });
 
   test("regular-mode TUI never dispatches component mouse events (defensive gate)", () => {
-    const overlay = sharedMakeOverlay(SideChatOverlay); // mock tui has no mode
+    const overlay = sharedMakeOverlay(SideChatOverlay);
     const result: TuiMouseEventResult | undefined = overlay.handleMouse(ev("press", "left", 5, 19));
     expect(result).toBeUndefined();
   });
@@ -246,8 +227,8 @@ describe("features.fullscreenCopyOnSelect mirror (spec #37, story #18)", () => {
     const overlay = makeOverlay(undefined, { features: mirrorFeatures });
     drag(overlay, 5, 19, 24);
     await tick();
-    expect(copiedTexts()).toEqual(["hello"]); // copied on release…
-    expect((overlay as any).messages.hasSelection()).toBe(true); // …highlight stays
+    expect(copiedTexts()).toEqual(["hello"]);
+    expect((overlay as any).messages.hasSelection()).toBe(true);
   });
 
   test("opt-in: a plain click copies nothing", async () => {

@@ -1,20 +1,3 @@
-/**
- * Provider retry assembly seam (spec #20, issue #21; rewired in #33 to the
- * registry-auth stream function): the overlay wraps the fork agent's stream
- * function (the model registry's `streamSimple`, bound) with the
- * `settings.retry.provider` injection when a provider block is configured,
- * and passes it through unchanged (identity) when it is not — so unconfigured
- * behavior is byte-identical to the bare `modelRegistry.streamSimple`
- * wiring, and auth resolves inside the registry at request time (no
- * hand-wired `getApiKey`).
- *
- * Seam: the `runnerFactory` test hook captures the assembled
- * `ForkTurnRunnerOptions`; a fake registry records what its `streamSimple`
- * receives. With no provider block the exact options object flows through
- * untouched (reference identity — `injectProviderRetry` returns its input);
- * with a block the options are replaced and the injected keys reach the
- * registry.
- */
 import { describe, expect, test } from "bun:test";
 import type { ForkTurnRunnerOptions } from "../srcs/fork-turn.ts";
 import { makeOverlay as sharedMakeOverlay } from "./helpers/make-overlay.ts";
@@ -24,10 +7,6 @@ const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
 const makeOverlay = (overrides: Record<string, unknown> = {}) =>
   sharedMakeOverlay(SideChatOverlay, [], overrides);
 
-/**
- * Build the overlay with a fake runner via the factory seam, returning a
- * getter for the assembled options.
- */
 function captureRunnerOptions(overrides: Record<string, unknown> = {}): () =>
   | ForkTurnRunnerOptions
   | undefined {
@@ -47,7 +26,6 @@ function captureRunnerOptions(overrides: Record<string, unknown> = {}): () =>
   return () => runnerOptions;
 }
 
-/** Fake registry: records every streamSimple call's third argument (options). */
 function capturingRegistry() {
   const calls: unknown[] = [];
   const registry = {
@@ -59,7 +37,6 @@ function capturingRegistry() {
   return { registry, calls };
 }
 
-/** Invoke the assembled streamFn and return what the registry received. */
 async function invokeStreamFn(
   getOpts: () => ForkTurnRunnerOptions | undefined,
   callerOptions: Record<string, unknown>,
@@ -90,7 +67,6 @@ describe("provider retry assembly (settings.retry.provider)", () => {
     expect(received.timeoutMs).toBe(10000);
     expect(received.maxRetries).toBe(15);
     expect(received.maxRetryDelayMs).toBe(60000);
-    // Caller options still spread through (spec #20 D2: explicit options win).
     expect(received.signal).toBe(callerOptions.signal);
   });
 
@@ -103,8 +79,6 @@ describe("provider retry assembly (settings.retry.provider)", () => {
     const callerOptions = { signal: new AbortController().signal };
     await invokeStreamFn(getOpts, callerOptions);
     expect(calls).toHaveLength(1);
-    // Reference identity: injectProviderRetry returns its input unchanged, so
-    // the very object the agent loop passed reaches the registry.
     expect(calls[0]).toBe(callerOptions);
   });
 

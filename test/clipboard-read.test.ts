@@ -1,12 +1,3 @@
-/**
- * Clipboard reader (issue #4, D3): the injected platform-channel matrix with
- * level-by-level fallback. Channels are plain injected functions, so the
- * success / fallback / all-fail paths are covered with fakes instead of
- * touching the host clipboard (prior art: config.test.ts's injected
- * temp-tree pattern). Outcomes distinguish text, an explicitly empty
- * clipboard, and no usable channel — the caller (right-click paste, #7)
- * surfaces a reason-specific hint from that.
- */
 import { describe, expect, test } from "bun:test";
 import {
   OSC52_QUERY,
@@ -29,7 +20,6 @@ const ok = (text: string): ClipboardReadOutcome => ({ ok: true, text });
 const unavailable: ClipboardReadOutcome = { ok: false, reason: "unavailable" };
 const empty: ClipboardReadOutcome = { ok: false, reason: "empty" };
 
-/** Build a channel whose read resolves to an outcome / rejects. */
 function channel(name: string, outcome: ClipboardReadOutcome | Error): ClipboardReadChannel {
   return {
     name,
@@ -295,12 +285,12 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk("from powershell\r\n"),
-      loadNative: () => undefined, // native helper unavailable — PowerShell path
+      loadNative: () => undefined,
       write: (s) => written.push(s),
       readReply: async () => null,
     });
     expect(outcome).toEqual(ok("from powershell"));
-    expect(written).toEqual([]); // primary succeeded — no OSC 52 query
+    expect(written).toEqual([]);
   });
 
   test("win32: empty primary is a definitive answer (no OSC 52 query)", async () => {
@@ -308,12 +298,12 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execOk(""),
-      loadNative: () => undefined, // native helper unavailable — PowerShell path
+      loadNative: () => undefined,
       write: (s) => written.push(s),
       readReply: async () => null,
     });
     expect(outcome).toEqual(empty);
-    expect(written).toEqual([]); // empty is definitive — cascade stops
+    expect(written).toEqual([]);
   });
 
   test("win32: primary fails, OSC 52 fallback succeeds", async () => {
@@ -321,7 +311,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "win32",
       exec: execFail,
-      loadNative: () => undefined, // native helper unavailable — PowerShell path
+      loadNative: () => undefined,
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("from osc52"),
     });
@@ -334,7 +324,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const outcome = await readClipboardTextFromSystem({
       platform: "darwin",
       exec: execFail,
-      loadNative: () => undefined, // native helper unavailable — pbpaste path
+      loadNative: () => undefined,
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("mac fallback"),
     });
@@ -346,7 +336,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
     const written: string[] = [];
     const outcome = await readClipboardTextFromSystem({
       platform: "linux",
-      loadNative: () => undefined, // getNativeClipboard(): no DISPLAY
+      loadNative: () => undefined,
       write: (s) => written.push(s),
       readReply: async () => osc52Reply("linux clipboard"),
     });
@@ -363,7 +353,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
       readReply: async () => null,
     });
     expect(outcome).toEqual(ok("x11 native"));
-    expect(written).toEqual([]); // native succeeded — no OSC 52 query
+    expect(written).toEqual([]);
   });
 
   test("win32: native helper success short-circuits (no subprocess, no OSC 52)", async () => {
@@ -380,8 +370,8 @@ describe("readClipboardTextFromSystem end-to-end", () => {
       loadNative: () => ({ getText: async () => "from native helper" }),
     });
     expect(outcome).toEqual(ok("from native helper"));
-    expect(execCalls).toBe(0); // PowerShell never spawned
-    expect(written).toEqual([]); // no OSC 52 query
+    expect(execCalls).toBe(0);
+    expect(written).toEqual([]);
   });
 
   test("win32: native empty is definitive (no subprocess, no OSC 52)", async () => {
@@ -420,7 +410,7 @@ describe("readClipboardTextFromSystem end-to-end", () => {
       readClipboardTextFromSystem({
         platform: "win32",
         exec: () => { throw new Error("powershell missing"); },
-        loadNative: () => undefined, // native helper unavailable too
+        loadNative: () => undefined,
         write: () => {},
         readReply: async () => null,
       }),

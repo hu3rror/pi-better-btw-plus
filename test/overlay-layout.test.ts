@@ -1,19 +1,3 @@
-/**
- * Table-driven unit tests for the pure overlay-layout module (spec #16 / ticket
- * #17). The module is the single source of the overlay's layout knowledge; these
- * tables guard:
- *
- * 1. the mirror contract — resolveLayout reproduces pi-tui's private
- *    TuiBase.resolveOverlayLayout semantics. Verified against the actual
- *    sources: the method is byte-identical in pi-tui 1.3.0 (dist/tui.js
- *    L836-924, devDep and runtime), including parseSizeValue (1.3.0
- *    L81). All expected values below are hand-derived from those sources.
- * 2. the frame-geometry invariants — msgTopRow = outer row + FRAME_HEADER_LINES,
- *    contentCol = outer col + FRAME_SIDE_PADDING, innerWidth = outer width − 4,
- *    editor band rows.
- * 3. the height heuristic (normal / small terminals).
- * 4. the viewport clamp (maxHeight + fixed top row).
- */
 import { describe, expect, test } from "bun:test";
 import type { OverlayOptions } from "@earendil-works/pi-tui";
 import {
@@ -241,21 +225,15 @@ describe("computeChatGeometry invariants", () => {
   for (const c of cases) {
     test(`${c.termCols}x${c.termRows} msg=${c.msgHeight} editor=${c.editorHeight}`, () => {
       const g = computeChatGeometry(c.termCols, c.termRows, c.msgHeight, c.editorHeight);
-      // The outer box is resolveLayout's; the frame offsets are named constants
-      // (same frame-height estimate the module uses internally — see the
-      // implementation note on computeChatGeometry).
       const frameHeight = c.msgHeight + c.editorHeight + FRAME_HEADER_LINES * 2;
       const layout = resolveLayout(c.termCols, c.termRows, frameHeight);
 
       expect(g.msgTopRow).toBe(layout.row + FRAME_HEADER_LINES);
       expect(g.contentCol).toBe(layout.col + FRAME_SIDE_PADDING);
       expect(g.innerWidth).toBe(layout.width - 4);
-      // Separator below the messages sits at msgTopRow + msgHeight; the input
-      // editor widget band starts on the next row.
       expect(g.editorTopRow).toBe(g.msgTopRow + g.msgHeight + 1);
       expect(g.editorHeight).toBe(c.editorHeight);
 
-      // Exact values (kept stable by the regression net select.test.ts too).
       expect(g.msgTopRow).toBe(c.exact.msgTopRow);
       expect(g.contentCol).toBe(c.exact.contentCol);
       expect(g.innerWidth).toBe(c.exact.innerWidth);
@@ -266,13 +244,13 @@ describe("computeChatGeometry invariants", () => {
 
 describe("computeSideChatHeight heuristic", () => {
   const cases: [number, number][] = [
-    [5, 3], // tiny terminal: never below 3 message rows
+    [5, 3],
     [10, 3],
-    [12, 3], // small terminal: clamps so the overlay still fits
+    [12, 3],
     [20, 8],
     [24, 8],
-    [40, 10], // normal terminal (2.5x of ~0.35*rows - 10)
-    [60, 28], // large terminal
+    [40, 10],
+    [60, 28],
   ];
 
   for (const [rows, expected] of cases) {
@@ -285,11 +263,7 @@ describe("computeSideChatHeight heuristic", () => {
     for (let rows = 3; rows <= 200; rows++) {
       const h = computeSideChatHeight(rows);
       expect(h).toBeGreaterThanOrEqual(3);
-      // 7 fixed rows (borders, header, editor, hints) around the message area.
       const overlayCap = Math.max(9, Math.min(Math.floor(rows * 0.88), rows - 4));
-      // The cap−7 bound only binds where it fits the 3-row floor; below ~14
-      // rows the floor wins by design (the overlay keeps 3 message rows even
-      // if it slightly overflows a very small terminal).
       if (overlayCap - 7 >= 3) expect(h).toBeLessThanOrEqual(overlayCap - 7);
     }
   });
@@ -297,11 +271,11 @@ describe("computeSideChatHeight heuristic", () => {
 
 describe("computeOverlayViewport clamp", () => {
   const cases: [number, number, { topRow: number; height: number }][] = [
-    [40, 30, { topRow: 1, height: 30 }], // below maxHeight → lastRenderHeight
-    [40, 50, { topRow: 1, height: 35 }], // clamped to maxHeight (88% of 40 = 35)
+    [40, 30, { topRow: 1, height: 30 }],
+    [40, 50, { topRow: 1, height: 35 }],
     [12, 9, { topRow: 1, height: 9 }],
-    [12, 20, { topRow: 1, height: 10 }], // maxHeight = 88% of 12 = 10
-    [4, 4, { topRow: 1, height: 3 }], // small terminal: maxHeight = rows - 1 = 3
+    [12, 20, { topRow: 1, height: 10 }],
+    [4, 4, { topRow: 1, height: 3 }],
     [4, 1, { topRow: 1, height: 1 }],
   ];
 

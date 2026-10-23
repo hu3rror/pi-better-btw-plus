@@ -1,10 +1,3 @@
-/**
- * Keymap screen + compact hint bar (issue #35): the overlay's public
- * behavior — Ctrl+O opens the keymap screen modal (grouped, feature-gated),
- * Esc closes it, and the compact hint bar renders with the pi-aligned
- * full-word grammar. External-behavior only: drive `handleInput` with
- * terminal sequences and assert the rendered frame.
- */
 import { describe, expect, mock, test } from "bun:test";
 import {
   frameText,
@@ -34,7 +27,6 @@ const CTRL_O = "\x0f"; // legacy Ctrl+O: SI (0x0F)
 const CTRL_L = "\x0c"; // legacy Ctrl+L: form feed (0x0C)
 const ESC = "\x1b";
 
-/** Minimal real-shaped model fixture (same shape as model-switch.test.ts). */
 function makeModel(id: string): any {
   return {
     id,
@@ -51,7 +43,6 @@ function makeModel(id: string): any {
   };
 }
 
-/** Minimal ModelRegistry stub with an authenticated model for picker tests. */
 function makeRegistry(models: any[]): any {
   return {
     getAvailable: () => models,
@@ -174,7 +165,6 @@ describe("keymap screen (Ctrl+O modal)", () => {
     });
     overlay.handleInput(CTRL_L);
     expect(frameText(overlay)).toContain("Select model");
-    // The picker's own hint row advertises Ctrl+O help, so it must work here.
     overlay.handleInput(CTRL_O);
     const keymap = frameText(overlay);
     expect(keymap).toContain("Navigation");

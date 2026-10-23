@@ -1,18 +1,3 @@
-/**
- * Provider-level retry injection helper unit tests (spec #20, issue #21): a
- * pure assembly helper wraps the fork's stream function so that
- * `settings.retry.provider` (timeoutMs / maxRetries / maxRetryDelayMs) reaches
- * pi's streamSimple — which internally performs the HTTP-layer retry. The
- * helper itself does no retrying: it only injects options (D1/D2/D3).
- *
- * Contract under test (spec "新单元 seam"):
- * - 缺省键被注入: keys the caller did not provide are filled from settings;
- * - 调用方显式 options 优先: explicit caller options beat settings (?? order);
- * - 其余键透传: unrelated options pass through untouched;
- * - 返回值透传: the wrapped function returns what the inner stream returns;
- * - 无配置恒等: no settings / no injectable keys ⇒ the SAME function is
- *   returned (byte-identical behavior with today's bare streamFn wiring).
- */
 import { describe, expect, test } from "bun:test";
 import {
   injectProviderRetry,
@@ -20,7 +5,6 @@ import {
   type ProviderStreamFn,
 } from "../srcs/provider-retry.ts";
 
-/** Fake stream fn recording every options object it receives. */
 function fakeStream() {
   const calls: unknown[] = [];
   const result = { stream: "result" };
@@ -46,7 +30,6 @@ const SETTINGS: ProviderRetrySettings = {
   maxRetryDelayMs: 30000,
 };
 
-/** Invoke a wrapped stream fn with loose args (drops pi's strict types). */
 function call(
   wrapped: ProviderStreamFn,
   model: unknown = null,
@@ -102,7 +85,7 @@ describe("injectProviderRetry (settings.retry.provider)", () => {
     expect(calls[0]).toEqual({
       timeoutMs: 1000,
       maxRetries: 2,
-      maxRetryDelayMs: 30000, // not provided by the caller → settings value
+      maxRetryDelayMs: 30000,
     });
   });
 

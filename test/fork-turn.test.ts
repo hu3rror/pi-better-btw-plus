@@ -1,22 +1,9 @@
-/**
- * ForkTurnRunner direct-drive suite (issue #10, T1): the full retry matrix and
- * lane enforcement are driven through the runner's public seam — run / cancel /
- * isRunning and the TurnPhase log — with a scripted fake agent injected via
- * agentFactory and synthetic agent events via the fake's emit() helper. No TUI,
- * no mocked overlay, no private-field pokes: phases are read like a log.
- *
- * The matrix is the frozen spec from issue #9 (Implementation Decisions +
- * Testing Decisions), moved here nearly verbatim from the overlay's retry
- * wiring suite, with render assertions replaced by phase-sequence assertions.
- * Prior art: retry.test.ts (scripted attempt / fake clock driving runWithRetry).
- */
 import { describe, expect, test } from "bun:test";
 import type { Agent, AgentOptions } from "@earendil-works/pi-agent-core";
 import { ForkTurnRunner, type TurnPhase } from "../srcs/fork-turn.ts";
 import type { PromptPack } from "../srcs/prompt-pack.ts";
 import type { RetryPolicy } from "../srcs/retry.ts";
 
-// --- Scripted fake agent ----------------------------------------------------
 
 type AgentBehavior =
   | { kind: "fail"; errorMessage: string; partialText?: string }
@@ -26,16 +13,9 @@ type AgentBehavior =
 
 interface AgentCall {
   kind: "prompt" | "continue";
-  /** Transcript snapshot at call time (proves the failed message was stripped). */
   messagesAtStart: unknown[];
 }
 
-/**
- * Agent-shaped scripted fake. `emit()` fires synthetic agent events through the
- * runner's subscription (lane-detection paths); `holdNext`/`releaseHeld` stall
- * one attempt so tests can observe mid-turn state; `lastContext` records the
- * transient context the runner's transformContext returned for the latest call.
- */
 function makeFakeAgent(behaviors: AgentBehavior[]) {
   const listeners: Array<(event: any) => void> = [];
   const state: any = {
@@ -65,9 +45,6 @@ function makeFakeAgent(behaviors: AgentBehavior[]) {
       holdNextAttempt = false;
       await new Promise<void>((resolve) => held.push(resolve));
     }
-    // The real agent applies transformContext before every LLM call (transient
-    // request-only additions); the fake records the returned context so tests
-    // can assert what was injected.
     if (transformContext) lastContext = await transformContext(state.messages.slice());
     const behavior = behaviors[Math.min(next, behaviors.length - 1)];
     next++;
@@ -142,7 +119,6 @@ function makeFakeAgent(behaviors: AgentBehavior[]) {
 
 type FakeAgent = ReturnType<typeof makeFakeAgent>;
 
-// --- Harness -----------------------------------------------------------------
 
 const DEFAULT_RETRY: RetryPolicy = { enabled: true, maxRetries: 3, baseDelayMs: 10 };
 const PROMPT_PACK: PromptPack = {
@@ -162,7 +138,6 @@ interface HarnessOptions {
   isReadOnlyTool?: (name: string) => boolean;
 }
 
-/** Wire the runner to a fake agent and collect the TurnPhase log. */
 function makeHarness(fake: FakeAgent, options: HarnessOptions = {}) {
   const phases: TurnPhase[] = [];
   const runner = new ForkTurnRunner({
@@ -196,7 +171,6 @@ const lanes = (phases: TurnPhase[]) =>
 const streams = (phases: TurnPhase[]) =>
   phases.filter((p): p is Extract<TurnPhase, { kind: "stream" }> => p.kind === "stream");
 
-// --- Retry matrix -------------------------------------------------------------
 
 describe("fork-turn: retry matrix (T1)", () => {
   test("a transient error retries via continue; retry-wait carries attempt/maxAttempts/delayMs", async () => {
@@ -209,8 +183,6 @@ describe("fork-turn: retry matrix (T1)", () => {
     await runner.run("hello");
 
     expect(f.calls.map((c) => c.kind)).toEqual(["prompt", "continue"]);
-    // The phase log: failed attempt's transcript, the wait, the success
-    // transcript, the final transcript, then turn-end.
     expect(phaseKinds(phases)).toEqual([
       "messages",
       "retry-wait",
@@ -223,10 +195,9 @@ describe("fork-turn: retry matrix (T1)", () => {
     expect(waits[0]).toMatchObject({
       attempt: 1,
       maxAttempts: 3,
-      delayMs: 10, // baseDelayMs * 2^0
+      delayMs: 10,
       errorMessage: "model overloaded",
     });
-    // Final transcript: one user message (never re-submitted), success reply.
     expect(f.state.messages.filter((m: any) => m.role === "user")).toHaveLength(1);
     expect(f.state.messages[f.state.messages.length - 1].stopReason).toBe("stop");
   });
@@ -236,7 +207,6 @@ describe("fork-turn: retry matrix (T1)", () => {
       { kind: "fail", errorMessage: "503 Service Unavailable" },
       { kind: "succeed" },
     ]);
-    // Seed a prior successful turn: it must survive the cleanup.
     fake.state.messages.push(
       { role: "user", content: "earlier", timestamp: 1 },
       {
@@ -250,10 +220,8 @@ describe("fork-turn: retry matrix (T1)", () => {
     await runner.run("hi");
 
     expect(f.calls).toHaveLength(2);
-    // continue() ran from a transcript that no longer carries the error…
     const atContinue = f.calls[1].messagesAtStart as any[];
     expect(atContinue.some((m) => m.errorMessage === "503 Service Unavailable")).toBe(false);
-    // …but still holds the successful prior turn and both user messages.
     expect(atContinue.some((m) => m.role === "assistant" && m.stopReason === "stop")).toBe(true);
     expect(atContinue.filter((m) => m.role === "user")).toHaveLength(2);
   });
@@ -274,7 +242,7 @@ describe("fork-turn: retry matrix (T1)", () => {
     const waits = retryWaits(phases);
     expect(waits.map((w) => w.attempt)).toEqual([1, 2]);
     expect(waits.map((w) => w.maxAttempts)).toEqual([2, 2]);
-    expect(waits.map((w) => w.delayMs)).toEqual([1, 2]); // 2^(n-1) backoff
+    expect(waits.map((w) => w.delayMs)).toEqual([1, 2]);
     const last = f.state.messages[f.state.messages.length - 1];
     expect(last.stopReason).toBe("error");
     expect(last.errorMessage).toBe("still overloaded");
@@ -346,7 +314,6 @@ describe("fork-turn: retry matrix (T1)", () => {
 
     expect(f.calls.map((c) => c.kind)).toEqual(["prompt"]);
     expect(retryWaits(phases)).toEqual([]);
-    // No message_end arrived; the finally block still closes the turn.
     expect(phaseKinds(phases)).toEqual(["messages", "turn-end"]);
     expect(runner.isRunning).toBe(false);
   });
@@ -375,15 +342,15 @@ describe("fork-turn: retry matrix (T1)", () => {
       retryPolicy: { enabled: true, maxRetries: 3, baseDelayMs: 600 },
     });
 
-    const run = runner.run("hi"); // resolves only after the turn settles
+    const run = runner.run("hi");
     await tick();
-    await tick(); // attempt 1 failed; the 600ms wait is now pending
-    expect(runner.isRunning).toBe(true); // true during the backoff wait
+    await tick();
+    expect(runner.isRunning).toBe(true);
     const started = Date.now();
-    runner.cancel(); // Esc cancels the backoff
+    runner.cancel();
     await run;
 
-    expect(Date.now() - started).toBeLessThan(500); // no hang on the 600ms wait
+    expect(Date.now() - started).toBeLessThan(500);
     expect(f.calls.map((c) => c.kind)).toEqual(["prompt"]);
     expect(retryWaits(phases).map((w) => w.attempt)).toEqual([1]);
     const last = f.state.messages[f.state.messages.length - 1];
@@ -393,8 +360,6 @@ describe("fork-turn: retry matrix (T1)", () => {
   });
 
   test("features.retry=false arrives as an already-ANDed disabled policy (D11): zero backoff", async () => {
-    // D11: the overlay ANDs features.retry with settings.retry.enabled before
-    // constructing the runner — the disabled feature lands here as enabled:false.
     const fake = makeFakeAgent([{ kind: "fail", errorMessage: "overloaded" }]);
     const { runner, phases, fake: f } = makeHarness(fake, {
       retryPolicy: { enabled: false, maxRetries: 3, baseDelayMs: 100_000 },
@@ -409,7 +374,6 @@ describe("fork-turn: retry matrix (T1)", () => {
   });
 });
 
-// --- Lane enforcement ---------------------------------------------------------
 
 describe("fork-turn: lane enforcement (T1)", () => {
   test("violations: base reminder on the first, escalated + abort-after-inject on the second", async () => {
@@ -421,18 +385,16 @@ describe("fork-turn: lane enforcement (T1)", () => {
     });
 
     const run = runner.run("hi");
-    await tick(); // attempt 1 in flight (held)
+    await tick();
     f.emit({ type: "tool_execution_end", toolName: "bash", isError: true });
     f.emit({ type: "tool_execution_end", toolName: "bash", isError: true });
     f.releaseHeld();
     await run;
-    await tick(); // let the scheduled abort-after-inject land
+    await tick();
 
     expect(lanes(phases).map((l) => l.count)).toEqual([1, 2]);
     expect(lanes(phases).map((l) => l.escalated)).toEqual([false, true]);
     expect(lanes(phases).map((l) => l.tool)).toEqual(["bash", "bash"]);
-    // The escalated reminder was injected into the next context, and the
-    // turn was aborted right after the injection (abort-after-inject).
     const injected = (f.lastContext ?? []).filter((m: any) => m.role === "user");
     expect(
       injected.some((m: any) =>
@@ -482,7 +444,6 @@ describe("fork-turn: lane enforcement (T1)", () => {
   });
 });
 
-// --- Run lifecycle ------------------------------------------------------------
 
 describe("fork-turn: run lifecycle (T1)", () => {
   test("isRunning is true while an attempt is in flight, false once the turn settles", async () => {
@@ -518,7 +479,7 @@ describe("fork-turn: run lifecycle (T1)", () => {
 
     const first = runner.run("first");
     await tick();
-    await runner.run("second"); // ignored: no second prompt
+    await runner.run("second");
     expect(f.calls.map((c) => c.kind)).toEqual(["prompt"]);
     f.releaseHeld();
     await first;
@@ -538,14 +499,11 @@ describe("fork-turn: run lifecycle (T1)", () => {
 describe("fork-turn: getLastAssistantText", () => {
   test("skips the forked context and reads the side chat's own reply", () => {
     const fake = makeFakeAgent([]);
-    // Seed the forked main-lane context before the runner captures the
-    // initial-transcript boundary.
     fake.state.messages.push(
       { role: "user", content: "main lane question", timestamp: 1 },
       { role: "assistant", content: [{ type: "text", text: "main lane reply" }], stopReason: "stop" },
     );
     const { runner } = makeHarness(fake);
-    // No side-chat reply yet → undefined (never falls back to the fork context).
     expect(runner.getLastAssistantText()).toBeUndefined();
     fake.state.messages.push(
       { role: "assistant", content: [{ type: "text", text: "btw reply" }], stopReason: "stop" },
@@ -557,7 +515,6 @@ describe("fork-turn: getLastAssistantText", () => {
   test("an error-stop assistant message returns its errorMessage", () => {
     const fake = makeFakeAgent([]);
     const { runner } = makeHarness(fake);
-    // The error-stop message lands after the fork boundary (a real turn).
     fake.state.messages.push(
       { role: "assistant", content: [], stopReason: "error", errorMessage: "boom" },
     );

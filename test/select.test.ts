@@ -1,17 +1,3 @@
-/**
- * Side chat mouse-selection overlay integration tests (spec #13 步骤4):
- * the pointer gesture state machine now lives in pointer-gesture.ts and is
- * unit-tested there (test/pointer-gesture.test.ts). This file keeps only the
- * overlay-layer behaviors that still need the real overlay — layout geometry,
- * hotkey copy on the retained selection, copy status feedback and the copy
- * failure path — plus the untouched classifier and message-store suites.
- *
- * Runs against the real modules with a mocked TUI/theme. The clipboard write
- * side is mocked (see helpers/clipboard-mock.ts): instead of intercepting
- * `process.stdout.write` for the OSC 52 fallback — which Windows never
- * reaches because the native clipboard addon wins — tests assert that the
- * copied text flowed into the mocked `copyToClipboard`.
- */
 import { describe, expect, test } from "bun:test";
 import { SideChatMessages } from "../srcs/side-chat-messages.ts";
 import {
@@ -37,8 +23,6 @@ await import("./helpers/clipboard-mock.ts");
 const { copiedTexts, setCopyImplementation, resetCopyImplementation } =
   await import("./helpers/clipboard-mock.ts");
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
-// Spec issue #19 integration regression: drives a real submit through the
-// status channel, so ForkTurnRunner must load too (fake agent via runnerFactory).
 const { ForkTurnRunner } = await import("../srcs/fork-turn.ts");
 // Overlay harness: the constructor is passed in so the helper stays free of
 // a static overlay import (mock.module ordering is controlled here).
@@ -114,7 +98,6 @@ describe("side-chat-messages.ts", () => {
     const messages = new SideChatMessages(theme, 10);
     messages.setMessages(DEFAULT_MESSAGES);
     messages.render(80);
-    // rendered layout: user msg, blank separator, assistant msg, ...
     messages.setSelection({ line: 0, col: 5 }, { line: 2, col: 8 });
     expect(messages.getSelectedText()).toBe(
       ": hello world this is a long message\n\n[Assista",
@@ -145,16 +128,12 @@ describe("side-chat-messages.ts", () => {
     const messages = new SideChatMessages(theme, 10);
     messages.setMessages(DEFAULT_MESSAGES);
     messages.render(80);
-    // Select the whole assistant line (line 2), like a double-click would.
     messages.setSelection({ line: 2, col: 0 }, { line: 2, col: 80 });
     const before = messages.getSelectedText();
     expect(before.startsWith("[Assistant]: assistant reply")).toBe(true);
-    // Copy feedback appends a status line + blank line, shifting the window.
     messages.setToolStatus("✓ Copied 10 chars");
     const rendered = messages.render(80);
-    // Selection must still resolve to the same content after the shift.
     expect(messages.getSelectedText()).toBe(before);
-    // And the highlight must be on the correct (shifted) line.
     const shifted = rendered.findIndex((l) => l.includes("\x1b[7m"));
     expect(shifted).toBeGreaterThanOrEqual(0);
     expect(
@@ -162,7 +141,6 @@ describe("side-chat-messages.ts", () => {
         "[Assistant]: assistant reply",
       ),
     ).toBe(true);
-    // Once the status clears, the selection keeps resolving to the content.
     messages.clearToolStatusIf("✓ Copied 10 chars");
     messages.render(80);
     expect(messages.getSelectedText()).toBe(before);
@@ -178,9 +156,9 @@ describe("side-chat-overlay.ts", () => {
       innerWidth: number;
       msgHeight: number;
     };
-    expect(g.msgTopRow).toBe(4); // marginTop 1 + border/header/separator 3
-    expect(g.contentCol).toBe(11); // leftCol 9 + border + padding 2
-    expect(g.innerWidth).toBe(98); // width 102 - 4
+    expect(g.msgTopRow).toBe(4);
+    expect(g.contentCol).toBe(11);
+    expect(g.innerWidth).toBe(98);
     expect(g.msgHeight).toBeGreaterThanOrEqual(7);
     expect(g.msgHeight).toBeLessThanOrEqual(10);
   });
@@ -198,7 +176,6 @@ describe("side-chat-overlay.ts", () => {
 
   test("copying clears the selection so the next ctrl+c clears the input", async () => {
     const overlay = makeOverlay();
-    // Drag-select "hello" on the first user line, then hotkey-copy it.
     overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
@@ -206,8 +183,6 @@ describe("side-chat-overlay.ts", () => {
     overlay.handleInput("\x03");
     await tick();
     expect(copiedTexts()[0]).toBe("hello");
-    // The copy consumes the selection: the highlight is gone, so the next
-    // ctrl+c falls into the clear-input lane instead of re-copying.
     expect((overlay as any).messages.hasSelection()).toBe(false);
   });
 
@@ -220,8 +195,8 @@ describe("side-chat-overlay.ts", () => {
     };
     selectHello();
     await tick();
-    expect(copiedTexts().length).toBe(0); // nothing copied at release
-    overlay.handleInput("\x03"); // raw Ctrl+C terminal byte
+    expect(copiedTexts().length).toBe(0);
+    overlay.handleInput("\x03");
     await tick();
     expect(copiedTexts()[0]).toBe("hello");
     // The copy consumed the selection; reselect and copy via ctrl+shift+c
@@ -253,14 +228,13 @@ describe("side-chat-overlay.ts", () => {
     await tick();
     const M: any = (overlay as any).messages;
     expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
-    copiedTexts(); // consume the copy this test produced
+    copiedTexts();
   });
 
   test("copy failure surfaces an error status and keeps the selection", async () => {
     const overlay = makeOverlay();
     const M: any = (overlay as any).messages;
     M.setSelection({ line: 0, col: 0 }, { line: 0, col: 3 });
-    // Make the mocked clipboard fail so the whole copy path errors out.
     setCopyImplementation(async () => {
       throw new Error("stdout closed");
     });
@@ -270,12 +244,10 @@ describe("side-chat-overlay.ts", () => {
     expect(M.render(80).some((l: string) => l.includes("Copy failed"))).toBe(
       true,
     );
-    // A failed copy keeps the highlight so the user can retry.
     expect(M.hasSelection()).toBe(true);
   });
   test("right-click copy also consumes the selection", async () => {
     const overlay = makeOverlay();
-    // Drag-select "hello", then right-click over the chat area to copy.
     overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
@@ -289,8 +261,6 @@ describe("side-chat-overlay.ts", () => {
 
 
   test("the copy flash survives spinner ticks during the thinking gap (spec #19 wart)", async () => {
-    // Fake agent whose prompt stalls until released: the submit starts a turn
-    // whose spinner steady-source keeps ticking on the status channel.
     let releaseHeld: () => void = () => {};
     const held = new Promise<void>((resolve) => {
       releaseHeld = resolve;
@@ -313,12 +283,10 @@ describe("side-chat-overlay.ts", () => {
         }),
     });
 
-    // Submit: the runner is in flight (held), the spinner is the steady source.
     overlay.handleInput("hi");
     overlay.handleInput("\r");
     await tick();
 
-    // Drag-select a range in the chat area and hotkey-copy it (flash 1200ms).
     overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 0, col: 24, row: 5, isRelease: true });
@@ -327,17 +295,12 @@ describe("side-chat-overlay.ts", () => {
 
     const M: any = (overlay as any).messages;
     expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
-    // Let ≥1 spinner tick (80ms interval) fire: the flash must still be shown.
-    // 150ms < full clearMs is deliberate: status-channel.test.ts already covers
-    // the complete 1200ms window on a fake clock, so this integration step only
-    // needs real timers to prove one spinner tick cannot clobber the flash —
-    // waiting the full 1200ms would slow the suite for no extra signal.
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(M.render(80).some((l: string) => l.includes("Copied"))).toBe(true);
     expect(M.render(80).some((l: string) => l.includes("Working"))).toBe(false);
-    copiedTexts(); // consume the copy this test produced
+    copiedTexts();
 
-    releaseHeld(); // settle the turn so no orphan timers leak
+    releaseHeld();
     await tick();
   });
 

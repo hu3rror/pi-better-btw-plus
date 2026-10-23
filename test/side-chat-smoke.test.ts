@@ -1,13 +1,3 @@
-/**
- * Side chat overlay smoke suite (issue #11, T2): the overlay runs every turn
- * through ForkTurnRunner (fork-turn.ts) and renders its TurnPhase events.
- * These three cases drive the REAL overlay + a real ForkTurnRunner with a
- * scripted fake agent injected through the runnerFactory test seam (agentFactory
- * → fake), and assert ONLY the rendered frame — zero private-field pokes, no
- * direct turn-loop access. The old poke-based retry wiring suite (retry-wiring.
- * test.ts) is superseded by this thin public-surface suite; the full retry
- * matrix lives in fork-turn.test.ts (T1), which drives the runner directly.
- */
 import { describe, expect, test } from "bun:test";
 import type { Agent } from "@earendil-works/pi-agent-core";
 import {
@@ -21,17 +11,11 @@ import {
 
 const { SideChatOverlay } = await import("../srcs/side-chat-overlay.ts");
 
-// --- Scripted fake agent ----------------------------------------------------
 
 type AgentBehavior =
   | { kind: "fail"; errorMessage: string; partialText?: string; noMessageEnd?: boolean }
   | { kind: "succeed"; text?: string };
 
-/**
- * Agent-shaped scripted fake. `emit()` fires synthetic agent events through
- * the runner's subscription (lane-detection paths); `holdNext`/`releaseHeld`
- * stall one attempt so tests can observe mid-turn state.
- */
 function makeFakeAgent(behaviors: AgentBehavior[]) {
   const listeners: Array<(event: any) => void> = [];
   const state: any = {
@@ -118,12 +102,6 @@ function frameText(overlay: { render(width: number): string[] }): string {
   return overlay.render(OVERLAY_TEST_WIDTH).join("\n");
 }
 
-/**
- * Overlay + real ForkTurnRunner wired to a scripted fake agent: the overlay
- * assembles the runner's deps as in production, and `agentFactory` returns
- * the fake. Submitting goes through the editor (public input); the lane smoke
- * is driven via `fake.emit()`; assertions read `overlay.render()`.
- */
 function makeSmokeHarness(
   behaviors: AgentBehavior[],
   overrides: Record<string, unknown> = {},
@@ -149,7 +127,7 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
     ]);
 
     overlay.handleInput("hello");
-    overlay.handleInput("\r"); // Enter submits via the editor
+    overlay.handleInput("\r");
     await tick();
     await tick();
 
@@ -171,10 +149,9 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
     overlay.handleInput("\r");
     await tick();
 
-    // The retry countdown ticker is live while the backoff wait is pending.
     expect(frameText(overlay)).toContain("Retrying (1/3)");
 
-    overlay.handleInput("\x1b"); // Esc cancels the wait
+    overlay.handleInput("\x1b");
     await tick();
 
     const frame = frameText(overlay);
@@ -185,7 +162,7 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
 
   test("the compact bar swaps to Esc stop while a turn is running", async () => {
     const { overlay, fake } = makeSmokeHarness([{ kind: "succeed" }]);
-    fake.holdNext(); // attempt 1 stays in flight so the runner is running
+    fake.holdNext();
 
     overlay.handleInput("hi");
     overlay.handleInput("\r");
@@ -199,14 +176,12 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
 
   test("a mid-turn lane violation renders the blocked status", async () => {
     const { overlay, fake } = makeSmokeHarness([{ kind: "succeed" }]);
-    fake.holdNext(); // attempt 1 stays in flight so the turn cannot settle
+    fake.holdNext();
 
     overlay.handleInput("hi");
     overlay.handleInput("\r");
-    await tick(); // attempt 1 in flight (held)
+    await tick();
 
-    // Detection signal: an error result for a tool not in the read-only lane
-    // (absent tools produce "Tool X not found" errors).
     fake.emit({ type: "tool_execution_end", toolName: "bash", isError: true });
     fake.emit({ type: "tool_execution_end", toolName: "bash", isError: true });
 
@@ -219,9 +194,6 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
   });
 
   test("a retry wait drops the failed attempt's partial text when no message_end arrives", async () => {
-    // Transport-level failures may cut the stream without a message_end; the
-    // retry wait must not keep rendering the stale partial text (mirrors the
-    // attempt-boundary cleanup the pre-runner wiring did).
     const { overlay } = makeSmokeHarness(
       [
         { kind: "fail", errorMessage: "connection lost", partialText: "partial reply", noMessageEnd: true },
@@ -234,7 +206,6 @@ describe("side-chat-overlay smoke (#11, T2)", () => {
     overlay.handleInput("\r");
     await tick();
 
-    // Retry wait is live: the countdown shows, and the stale partial text must not.
     const waiting = frameText(overlay);
     expect(waiting).toContain("Retrying (1/3)");
     expect(waiting).not.toContain("[Assistant]: partial reply");

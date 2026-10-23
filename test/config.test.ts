@@ -1,16 +1,8 @@
-/**
- * Regression tests for the layered config resolution (config.ts):
- * bundle <extensionDir>/config.json → user ~/.pi/agent/pi-better-btw →
- * project <cwd>/.pi/pi-better-btw. Allowlists union across layers with an
- * exclude escape hatch; promptPack merges per leaf key with higher layer
- * winning and paths resolved against each layer's own directory.
- */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, loadRetryPolicy } from "../srcs/config.ts";
-/** Build a temp three-layer config tree and return a loadConfig handle. */
 function makeTree(overrides: {
   bundle?: unknown;
   user?: unknown;
@@ -169,17 +161,13 @@ describe("config.ts layered resolution", () => {
     });
     try {
       const pack = tree.load().promptPack!;
-      // framing: bundle → user override (bundle value never seen).
       expect(pack.framing).toBe(join(tree.userDir, "user-f.md"));
-      // base: all three layers define it → project wins.
       expect(pack.laneReminders?.base).toBe(
         join(tree.cwd, ".pi", "pi-better-btw", "proj-base.md"),
       );
-      // escalated: user then project → project wins.
       expect(pack.laneReminders?.escalated).toBe(
         join(tree.cwd, ".pi", "pi-better-btw", "proj-esc.md"),
       );
-      // preamble: only project defines it → still resolved against the project layer.
       expect(pack.laneReminders?.preamble).toBe(
         join(tree.cwd, ".pi", "pi-better-btw", "proj-preamble.md"),
       );
@@ -250,13 +238,6 @@ describe("config.ts layered resolution", () => {
   });
 });
 
-/**
- * loadRetryPolicy reads pi's own settings files — global
- * <agentConfigDir>/settings.json merged with project <cwd>/.pi/settings.json
- * (project wins per key, pi's deepMergeSettings semantics) — and extracts the
- * `retry` block with pi's defaults (enabled=true, maxRetries=3, baseDelayMs=2000,
- * maxAgentDelayMs=60000).
- */
 describe("loadRetryPolicy (pi settings.retry)", () => {
   function makeRetryTree(overrides: {
     global?: unknown;
@@ -477,7 +458,6 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
     const originalCwd = process.cwd();
     try {
       process.chdir(tree.cwd);
-      // No cwd option → the project layer must be read from process.cwd().
       expect(loadRetryPolicy({ agentConfigDir: tree.agentDir }).maxRetries).toBe(2);
     } finally {
       process.chdir(originalCwd);
@@ -558,12 +538,6 @@ describe("loadRetryPolicy (pi settings.retry)", () => {
   });
 });
 
-/**
- * Feature switches (D11): per-leaf-key merge, higher layer wins, keys no
- * layer defines keep their defaults (four switches true, the
- * fullscreenCopyOnSelect opt-in (spec #37) false). A layer can disable one
- * behavior (`"retry": false`) without re-declaring the others.
- */
 describe("config.ts features (D11)", () => {
   test("no features anywhere: defaults hold (four true, fullscreenCopyOnSelect false)", () => {
     const tree = makeTree({});

@@ -1,13 +1,3 @@
-/**
- * Right-click paste in the input editor (issue #7, D4): the overlay reads the
- * system clipboard via the injected channel matrix and routes the text through
- * the Editor's built-in bracketed-paste entry, so normalization, large-paste
- * collapse to a `[paste #N …]` marker and the atomic undo snapshot all come
- * from the Editor itself. Runs against the real modules with a mocked
- * TUI/theme. The clipboard read side is mocked (helpers/clipboard-read-mock.ts,
- * mirror of the write-side facility from D13); the write side is mocked too so
- * the coexistence tests never touch the host clipboard.
- */
 import { describe, expect, test } from "bun:test";
 import type { SideChatOverlay as SideChatOverlayType } from "../srcs/side-chat-overlay.ts";
 import { makeOverlay as sharedMakeOverlay } from "./helpers/make-overlay.ts";
@@ -70,7 +60,6 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     await tick();
     const ed: any = (overlay as any).editor;
     expect(ed.getText()).toMatch(/^\[paste #1 \+12 lines\]$/);
-    // The full text is recoverable through the editor's expanded view.
     expect(ed.getExpandedText()).toBe(big);
   });
 
@@ -87,8 +76,6 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
   test("submit sends the expanded text (not the marker) to the agent", async () => {
     const prompts: string[] = [];
     const overlay = makeOverlay(undefined, {
-      // The turn loop lives in the runner: a harness runner records the
-      // submitted text instead of hitting the network.
       runnerFactory: () =>
         ({
           agent: { state: { messages: [] } },
@@ -103,7 +90,7 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     setClipboardReadResult(big);
     rightClick(overlay, editorRow(overlay));
     await tick();
-    overlay.handleInput("\r"); // Enter submits via the editor's submit path
+    overlay.handleInput("\r");
     await tick();
     expect(prompts).toEqual([big]);
   });
@@ -156,7 +143,6 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     const g = (overlay as any).geometry as { msgTopRow: number; msgHeight: number };
     const chatRow = g.msgTopRow + 1; // 1-based first chat line
     setClipboardReadResult("hi");
-    // press in the editor, release over the chat → no paste
     overlay.handleMouseEvent({
       button: 2,
       col: 20,
@@ -166,7 +152,6 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: true });
     await tick();
     expect((overlay as any).editor.getText()).toBe("");
-    // press over the chat, release in the editor → no paste either
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: false });
     overlay.handleMouseEvent({
       button: 2,
@@ -190,22 +175,17 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     const overlay = makeOverlay();
     const g = (overlay as any).geometry as { msgTopRow: number };
     const M: any = (overlay as any).messages;
-    const chatRow = g.msgTopRow + 1; // 1-based first chat line
-    // A retained selection + right-click over the chat copies (write side).
+    const chatRow = g.msgTopRow + 1;
     M.setSelection({ line: 0, col: 7 }, { line: 0, col: 12 });
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: false });
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: true });
     await tick();
     expect(copiedTexts()).toEqual(["hello"]);
-    // Right-click over the editor pastes, and never copies.
     setClipboardReadResult("pasted");
     rightClick(overlay, editorRow(overlay));
     await tick();
     expect((overlay as any).editor.getText()).toBe("pasted");
     expect(copiedTexts().length).toBe(0);
-    // A fresh selection + right-click copies again: the paste didn't disturb
-    // the copy branch — the previous copy consumed its selection (spec #22),
-    // so the user reselects before copying.
     M.setSelection({ line: 0, col: 7 }, { line: 0, col: 12 });
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: false });
     overlay.handleMouseEvent({ button: 2, col: 20, row: chatRow, isRelease: true });
@@ -219,7 +199,6 @@ describe("side-chat-overlay.ts right-click paste (#7)", () => {
     overlay.handleMouseEvent({ button: 0, col: 19, row: 5, isRelease: false });
     overlay.handleMouseEvent({ button: 32, col: 24, row: 5, isRelease: false });
     expect(overlay.isMouseDragging()).toBe(true);
-    // stray right release (no press) during the drag must not paste
     overlay.handleMouseEvent({ button: 2, col: 20, row: editorRow(overlay), isRelease: true });
     await tick();
     expect((overlay as any).editor.getText()).toBe("");

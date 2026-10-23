@@ -1,14 +1,3 @@
-/**
- * Extension entry lifecycle (index.ts): /btw opens the fork overlay, Alt+W
- * backgrounds it, and /btw again restores the hidden overlay — same as Alt+W
- * restore. Drives the REAL index.ts closures (toggleSideChat /
- * backgroundSideChat / openSideChat) against a mocked pi boundary
- * (ExtensionAPI, ctx.ui.custom, TUI overlay handle).
- *
- * Regression for: the hidden overlay could not be re-shown via /btw (only
- * Alt+W worked) — this pins the extension-side restore path so a future break
- * in the toggle logic is caught here, independent of the pi runtime.
- */
 import { describe, expect, test } from "bun:test";
 import { getExtensionDir } from "../srcs/prompt-pack.ts";
 import { SIDE_CHAT_SHORTCUT } from "../srcs/shortcuts.ts";
@@ -48,7 +37,6 @@ function makeHandle() {
   };
 }
 
-/** Minimal pi mock: routes registrations into `handlers` (commands/shortcuts). */
 function makePi(handlers: Record<string, (...args: any[]) => Promise<unknown>>): any {
   return {
     registerShortcut: (name: string, opts: any) => {
@@ -62,7 +50,6 @@ function makePi(handlers: Record<string, (...args: any[]) => Promise<unknown>>):
   };
 }
 
-/** Base command context (mode/ui overridable per test). */
 function makeCtx(overrides: Record<string, any> = {}) {
   return {
     model: { id: "test-model" },
@@ -116,7 +103,6 @@ describe("DEBUG bug1: /btw restore after Alt+W hide", () => {
     expect(btw).toBeDefined();
     expect(altW).toBeDefined();
 
-    // 1. open
     // 1. open — custom() hangs until done() (real pi behavior), so drive it
     // fire-and-forget; the mock custom() runs factory/onHandle synchronously.
     const openP = btw("", ctx);
@@ -125,14 +111,12 @@ describe("DEBUG bug1: /btw restore after Alt+W hide", () => {
     expect(handle!.state().hidden).toBe(false);
     expect(notifyCount).toBe(0);
     void openP;
-    // 2. Alt+W hide — shortcut handlers take a single (ctx) argument.
     await altW(ctx);
     expect(handle!.state().hidden).toBe(true);
 
-    // 3. /btw again — MUST restore, exactly like Alt+W would
     await btw("", ctx);
     expect(handle!.state().hidden).toBe(false);
-    expect(notifyCount).toBe(0); // must not hit the "Close or background" warn
+    expect(notifyCount).toBe(0);
   });
 });
 
@@ -145,8 +129,6 @@ describe("non-TUI mode guard (openSideChat)", () => {
     const pi = makePi(handlers);
 
     const ui: any = {
-      // The overlay factory must never run outside TUI mode — a silent no-op
-      // there is exactly what the guard exists to prevent.
       custom: () => {
         customCalls++;
         throw new Error("ctx.ui.custom must not run outside TUI mode");
