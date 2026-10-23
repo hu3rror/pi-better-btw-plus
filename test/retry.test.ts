@@ -122,18 +122,41 @@ describe("classifyRetryable", () => {
       "request timeout",
       "websocket closed unexpectedly",
       "stream ended before message_stop",
+      // pi 1.4.0 (issue #11057): Codex CLI mid-stream disconnect relayed by
+      // proxies wrapping the Codex CLI is retried.
+      "stream disconnected before completion: stream closed before response.completed",
+      // pi 1.4.0 (issue #10920): gateway upstream failures relayed as
+      // `response.failed` error codes are retried.
+      "upstream request failed",
+      "upstream_stream_read_error",
+      "stream was interrupted",
+      "http/2 stream failed",
+      // pi 1.4.0 (issue #10996): node-fetch system errors, e.g. the Google
+      // ADC OAuth token refresh, are retried (the reason is often empty).
+      "request to https://oauth2.googleapis.com/token failed, reason: connect ETIMEDOUT",
       // pi 1.1.0 (issue #10379): Bedrock HTTP/2 stream cancel is retried.
       "pending stream has been canceled",
-      "you can retry your request",
-      "ResourceExhausted",
-      // Sign in with ChatGPT (pi 1.1.0 retry.js): usage/user data
-      // temporarily unavailable, can arrive mid-stream without an HTTP 503.
-      "subscription_sharing_usage_unavailable",
-      "subscription_sharing_user_unavailable",
     ];
     for (const message of retryable) {
       expect(classifyRetryable(err(message))).toBe(true);
     }
+  });
+
+  test("status codes embedded in longer numbers/words are not retryable (pi 1.4.0 #11057)", () => {
+    // pi 1.4.0 retry.js bounds status codes with (?<![a-z0-9])...(?![a-z0-9])
+    // so a request id or byte count no longer false-matches a status code.
+    for (const message of [
+      "4291",
+      "HTTP 5000 error",
+      "error code 50213",
+      "bytes=504123",
+      "task-520x",
+    ]) {
+      expect(classifyRetryable(err(message))).toBe(false);
+    }
+    // Standalone status codes still match.
+    expect(classifyRetryable(err("429 Too Many Requests"))).toBe(true);
+    expect(classifyRetryable(err("500 Internal Server Error"))).toBe(true);
   });
 
   test("quota / billing exhaustion is not retryable", () => {
@@ -147,6 +170,9 @@ describe("classifyRetryable", () => {
       // Sign in with ChatGPT (pi 1.1.0 retry.js): the subscription's shared
       // usage limit, which resets after hours rather than seconds.
       "subscription_sharing_usage_limit_exceeded",
+      // Sign in with ChatGPT on a ChatGPT Business plan (pi 1.4.0 retry.js):
+      // an admin-set workspace usage limit is never retried.
+      "subscription_sharing_workplace_individual_usage_limit_exceeded",
     ];
     for (const message of nonRetryable) {
       expect(classifyRetryable(err(message))).toBe(false);
