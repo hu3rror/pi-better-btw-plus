@@ -35,7 +35,6 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 
-/** A position in editor visual space. */
 export interface EditorPos {
   /** Visual line index within the editor content band (0-based, top border excluded). */
   line: number;
@@ -43,15 +42,12 @@ export interface EditorPos {
   col: number;
 }
 
-/** A visual-space selection over the editor content band. */
 export interface EditorSelection {
   anchor: EditorPos;
   focus: EditorPos;
 }
 
-/** One visual line's inverse-video highlight range (content-band coordinates). */
 export interface EditorHighlightRange {
-  /** Content-band line index. */
   line: number;
   /** Start cell column (inclusive). */
   start: number;
@@ -76,7 +72,6 @@ function isPasteMarkerText(segment: string): boolean {
   return segment.length >= 10 && PASTE_MARKER_SINGLE.test(segment);
 }
 
-/** Cell-column spans of every paste-marker literal in a plain line. */
 function pasteMarkerSpans(
   plain: string,
 ): Array<{ start: number; end: number }> {
@@ -92,7 +87,6 @@ function pasteMarkerSpans(
   return spans;
 }
 
-/** Map a cell column to the code-unit index of the grapheme containing it. */
 function colToCharIndex(plain: string, col: number): number {
   let width = 0;
   for (const seg of graphemeSegmenter.segment(plain)) {
@@ -103,7 +97,6 @@ function colToCharIndex(plain: string, col: number): number {
   return plain.length;
 }
 
-/** Snap a cell column to a grapheme boundary ("start" floors, "end" ceils). */
 function snapCol(plain: string, col: number, which: "start" | "end"): number {
   let width = 0;
   for (const { segment } of graphemeSegmenter.segment(plain)) {
@@ -116,12 +109,10 @@ function snapCol(plain: string, col: number, which: "start" | "end"): number {
   return col;
 }
 
-/** Clamp a cell column into [0, lineWidth]. */
 function clampCol(col: number, width: number): number {
   return Math.max(0, Math.min(col, width));
 }
 
-/** Clip a cell range so it never includes a paste-marker literal. */
 function clipRangeToMarkers(
   start: number,
   end: number,
@@ -130,18 +121,17 @@ function clipRangeToMarkers(
   let s = start;
   let e = end;
   for (const span of pasteMarkerSpans(plain)) {
-    if (span.end <= s) continue; // marker entirely before the range
-    if (span.start >= e) break; // markers are sorted; the rest are after
-    if (span.start <= s && span.end >= e) return { start: s, end: s }; // fully inside
-    if (span.start <= s) s = span.end; // marker covers the start
-    else if (span.end >= e) e = span.start; // marker covers the end
-    else e = span.start; // marker strictly inside → keep the left part
+    if (span.end <= s) continue;
+    if (span.start >= e) break;
+    if (span.start <= s && span.end >= e) return { start: s, end: s };
+    if (span.start <= s) s = span.end;
+    else if (span.end >= e) e = span.start;
+    else e = span.start;
     if (s >= e) return { start: s, end: s };
   }
   return { start: s, end: e };
 }
 
-/** Topmost/leftmost endpoint of a selection. */
 export function orderedStart(sel: EditorSelection): EditorPos {
   const { anchor, focus } = sel;
   if (
@@ -153,7 +143,6 @@ export function orderedStart(sel: EditorSelection): EditorPos {
   return focus;
 }
 
-/** Bottommost/rightmost endpoint of a selection. */
 export function orderedEnd(sel: EditorSelection): EditorPos {
   const { anchor, focus } = sel;
   if (
@@ -174,11 +163,6 @@ export function contentBandPlainLines(rendered: string[]): string[] {
   return rendered.slice(1, -1).map((l) => stripTerminalSequences(l).trimEnd());
 }
 
-/**
- * Per-visual-line inverse-video highlight ranges for a selection. Columns are
- * clamped to each line's visible width, snapped to grapheme boundaries, and
- * clipped so the range never crosses a paste marker.
- */
 export function highlightRanges(
   plainLines: string[],
   sel: EditorSelection,
@@ -283,10 +267,6 @@ export function wordSelection(
   };
 }
 
-/**
- * Triple-click visual-line selection: the whole line, from column 0 to the
- * line's visible width (paste-marker clipping still applies downstream).
- */
 export function lineSelection(
   plainLines: string[],
   line: number,

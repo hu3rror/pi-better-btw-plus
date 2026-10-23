@@ -13,7 +13,6 @@ export interface CellPos {
   col: number;
 }
 
-/** Map a terminal-cell column back to a character index in plain text. */
 function colToCharIndex(plain: string, col: number): number {
   let width = 0;
   for (let i = 0; i < plain.length; ) {
@@ -35,7 +34,6 @@ const SELECTION_STYLE_END = "\x1b[27m";
 // (user-role fallback placement) but must never render as a chat bubble.
 const FRAMING_MARKER = Symbol("btw-framing-message");
 
-/** Mark a message as the framing block so the render path skips it. */
 export function markFramingMessage<T extends AgentMessage>(message: T): T {
   (message as T & { [FRAMING_MARKER]?: boolean })[FRAMING_MARKER] = true;
   return message;
@@ -81,7 +79,6 @@ export class SideChatMessages implements Component {
    */
   private frozenAnchor: number | null = null;
 
-  // --- Render cache (perf) ---
   // The conversation history is re-wrapped on EVERY render call (each mouse
   // drag motion event, each streaming delta, each 80ms spinner tick), so an
   // un-cached render that re-wraps the whole transcript cost ~21ms/frame at
@@ -89,15 +86,10 @@ export class SideChatMessages implements Component {
   // loop and make the whole terminal stutter during selection drags and
   // lane-blocked retry loops. Caching the wrapped lines per message (keyed
   // by message identity + width) makes steady-state frames O(visible) again.
-  /** Rendered lines of the injected-context cite (depends on width + injected count). */
   private prefixLines: string[] = [];
-  /** Cached wrapped lines per message index (keyed by message reference + width). */
   private messageCache: string[][] = [];
-  /** Message reference each cache entry was rendered from (null = needs render). */
   private messageRefs: (AgentMessage | null)[] = [];
-  /** Width the caches were built for; a resize invalidates everything. */
   private cachedWidth = 0;
-  /** Injected count the prefix was built for. */
   private cachedInject = -1;
 
   constructor(private theme: Theme, private maxVisibleLines: number) {}
@@ -110,17 +102,14 @@ export class SideChatMessages implements Component {
    */
   setInjectedMessageCount(count: number) {
     this.injectedCount = Math.max(0, count);
-    // The cite label/count feeds the prefix; force a rebuild on next render.
     this.cachedInject = -1;
     this.prefixLines = [];
   }
 
   setMessages(messages: AgentMessage[]) {
     this.messages = messages;
-    // New content invalidates the mouse selection.
     this.selection = null;
     if (this.frozenAnchor === null) {
-      // Following: snap the viewport to the bottom.
       this.scrollOffset = 0;
     } else {
       // Frozen: keep the anchored content line at the viewport bottom. The
@@ -155,7 +144,6 @@ export class SideChatMessages implements Component {
     };
   }
 
-  /** Drop the active mouse selection. */
   clearSelection() {
     this.selection = null;
   }
@@ -165,14 +153,12 @@ export class SideChatMessages implements Component {
     return this.selection?.anchor ?? null;
   }
 
-  /** True when a non-empty selection is active (highlights are rendered). */
   hasSelection(): boolean {
     if (!this.selection) return false;
     const { anchor, focus } = this.selection;
     return anchor.line !== focus.line || anchor.col !== focus.col;
   }
 
-  /** Extract the selected text (per rendered line, joined with newlines). */
   getSelectedText(): string {
     if (!this.selection) return "";
     const { anchor, focus } = this.selection;
@@ -215,7 +201,6 @@ export class SideChatMessages implements Component {
     if (next === this.scrollOffset) return false;
     this.scrollOffset = next;
     if (next === 0) {
-      // Scrolled back to the bottom: resume following.
       this.frozenAnchor = null;
     } else {
       // Pin the new viewport position so arriving lines don't slide it.
@@ -271,13 +256,10 @@ export class SideChatMessages implements Component {
     }
     for (let i = 0; i < n; i++) {
       if (i < injected) {
-        // Injected batch renders as one collapsed cite line, never as bubbles.
         this.messageRefs[i] = this.messages[i];
         this.messageCache[i] = [];
         continue;
       }
-      // Framing-block messages are part of the LLM context but never render
-      // as chat bubbles (#9 fallback placement): cache an empty entry.
       if (isFramingMessage(this.messages[i])) {
         this.messageRefs[i] = this.messages[i];
         this.messageCache[i] = [];
@@ -291,9 +273,6 @@ export class SideChatMessages implements Component {
     if (injected !== this.cachedInject) {
       this.cachedInject = injected;
       if (injected > 0) {
-        // One collapsed, non-expandable cite line for the injected batch
-        // (fresh fork context, reopened history, refork) instead of the full
-        // history. The visible conversation starts after it.
         this.prefixLines = [
           ...wrapTextWithAnsi(this.theme.fg("muted", `[Context] ${injected} msg${injected === 1 ? "" : "s"}`), width),
           "",
@@ -330,9 +309,6 @@ export class SideChatMessages implements Component {
     }
 
     this.totalLines = lines.length;
-    // Freeze: while the user has scrolled away, grow the offset by the lines
-    // appended at the end, so the anchored content stays put instead of being
-    // pushed up by new streamed output.
     if (this.frozenAnchor !== null) {
       this.scrollOffset = Math.max(0, this.totalLines - this.frozenAnchor);
     }
@@ -358,7 +334,6 @@ export class SideChatMessages implements Component {
       }
     }
 
-    // Hit-testing and copy operate on the ANSI-stripped visible lines.
     this.plainLines = visible.map(stripTerminalSequences);
     if (this.selection && this.selection.focus.line >= visible.length) {
       // Defensive: the rendered line count shrank under the selection.
@@ -373,14 +348,12 @@ export class SideChatMessages implements Component {
     return visible;
   }
 
-  /** Clamp a cell position to the currently rendered lines. */
   private clampPos(pos: CellPos): CellPos {
     const line = Math.max(0, Math.min(pos.line, Math.max(0, this.plainLines.length - 1)));
     const maxCol = Math.max(0, visibleWidth(this.plainLines[line] ?? ""));
     return { line, col: Math.max(0, Math.min(pos.col, maxCol)) };
   }
 
-  /** Canonical (topmost-first) ordering helpers for a selection range. */
   private orderedStart(a: CellPos, b: CellPos): CellPos {
     return a.line < b.line || (a.line === b.line && a.col <= b.col) ? a : b;
   }
@@ -452,7 +425,6 @@ export class SideChatMessages implements Component {
   }
 
   handleInput(data: string): boolean {
-    // PgUp / PgDn scroll by a full page; Shift+Up / Shift+Down by a few lines.
     if (matchesKey(data, Key.pageUp)) {
       return this.scrollBy(this.maxVisibleLines);
     }

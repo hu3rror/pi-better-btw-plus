@@ -9,7 +9,6 @@ import type { ScopedModel } from "@earendil-works/pi-coding-agent";
  * (fork-local, ADR 0002) — the main session's model is never touched.
  */
 
-/** A selectable fork model: the model plus an optional scoped thinking level. */
 export interface ModelChoice {
   model: Model<any>;
   /**
@@ -54,7 +53,6 @@ export function clampThinkingLevelForModel(
   return clampThinkingLevel(model, level);
 }
 
-/** Canonical identity key for a model (provider + id). */
 export function modelKey(model: { provider: string; id: string }): string {
   return `${model.provider}\0${model.id}`;
 }

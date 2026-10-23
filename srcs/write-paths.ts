@@ -157,7 +157,6 @@ function tokenizeShell(command: string): ShellToken[] {
 /** Commands whose option grammar can select in-place writes. */
 const IN_PLACE_COMMANDS: ReadonlySet<string> = new Set(["sed", "perl", "awk"]);
 
-/** Redirect ops that push their target as a write path. */
 const REDIRECT_PUSH: ReadonlySet<ShellToken["value"]> = new Set([">", ">>", "&>", "&>>"]);
 
 /** Ops whose target (next word) is consumed: redirects push it, fd dups drop it. */

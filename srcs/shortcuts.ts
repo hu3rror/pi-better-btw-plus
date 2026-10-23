@@ -64,12 +64,10 @@ export const KEYBINDINGS = {
   keymapScreen: { keys: ["ctrl+o"], label: "help" },
 } as const satisfies Record<string, Keybinding>;
 
-/** Capitalize one key part: `ctrl` → `Ctrl`. */
 function formatKeyPart(part: string): string {
   return part.charAt(0).toUpperCase() + part.slice(1);
 }
 
-/** Display form of keys: `["ctrl+c", "ctrl+shift+c"]` → `Ctrl+C/Ctrl+Shift+C`. */
 export function formatKeyText(keys: readonly KeyId[]): string {
   return keys
     .map((k) => k.split("+").map(formatKeyPart).join("+"))
@@ -93,12 +91,10 @@ export function bindingText(
   };
 }
 
-/** True when `data` matches any of the keys. */
 export function matchesAnyKey(data: string, keys: readonly KeyId[]): boolean {
   return keys.some((key) => matchesKey(data, key));
 }
 
-/** True when `data` matches a binding's keys or one of its raw encodings. */
 export function matchesKeybinding(data: string, kb: Keybinding): boolean {
   if (kb.raw?.includes(data)) return true;
   return matchesAnyKey(data, kb.keys);

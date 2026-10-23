@@ -98,7 +98,6 @@ export interface ForkContext {
   extensionTools: AgentTool[];
 }
 
-/** Minimal session view used by the side chat (getEntries + getLeafId). */
 type SessionView = { getEntries(): SessionEntry[]; getLeafId(): string | null };
 
 interface SideChatOverlayOptions {
@@ -107,18 +106,14 @@ interface SideChatOverlayOptions {
   forkContext: ForkContext;
   tracker: FileActivityTracker;
   modelRegistry: ModelRegistry;
-  /** Models scoped to this session (--models / enabledModels); empty when unscoped. */
   scopedModels: readonly ScopedModel[];
   sessionManager: SessionView;
-  /** Prompt texts resolved from config.json `promptPack` (fresh per fork). */
   promptPack: PromptPack;
-  /** Extension tools allowed in read-only mode (config.json, git-untracked). */
   readOnlyExtensionAllowlist: string[];
   /** `settings.retry` budget/backoff read from pi's settings files (D8). The
    * optional `provider` block is consumed here by the stream assembly
    * (provider-layer retry, spec #20); the turn loop only sees the budget. */
   retryPolicy: RetryPolicy;
-  /** Per-feature kill switches resolved from the layered config (D11). */
   features: SideChatFeatures;
   /**
    * Test seam (default: one-line passthrough constructing the real
@@ -135,19 +130,15 @@ interface SideChatOverlayOptions {
     action: "close" | "refork" | "clear",
     messages: AgentMessage[],
   ) => void;
-  /** Alt+E export written to $CWD/.agents/eval/ — called with the written path. */
   onExport: (path: string) => void;
 }
 
-/** Feedback shown after a copy, cleared shortly after. */
 const COPIED_STATUS_PREFIX = "✓ Copied ";
 const COPIED_STATUS_CLEAR_MS = 1200;
 /** Degradation hint when every clipboard read channel fails (C1 unavailable). */
 const PASTE_FAILED_STATUS = "Clipboard read failed";
-/** Hint when the clipboard is readable but holds no text. */
 const PASTE_EMPTY_STATUS = "Clipboard is empty";
 const PASTE_STATUS_CLEAR_MS = 1200;
-/** Ctrl+X hint when the side chat has produced no assistant reply yet. */
 const NO_ASSISTANT_MESSAGE_STATUS = "No assistant message to copy yet";
 /** Alt+Shift+C hint when the input editor is empty (issue #23). */
 const INPUT_EMPTY_STATUS = "Input is empty";
@@ -160,9 +151,6 @@ const INPUT_EMPTY_STATUS = "Input is empty";
  * the prompt pack (framing block message + per-turn focus anchor).
  */
 
-// --- Lane enforcement (prototype for #8, texts from the prompt pack #13) ---
-// Trigger points only: transformContext (reminder injection) / beforeToolCall
-// (block reason) / afterToolCall (failed-note). UI copy stays in code.
 
 const LANE_BLOCKED_STATUS = "🚧 lane blocked";
 const PRE_ABORT_TEXT = "Turn stopped after repeated out-of-lane attempts.";
@@ -174,7 +162,6 @@ export class SideChatOverlay implements Component, Focusable {
   private messages: SideChatMessages;
   private editor: Editor;
   private streamingContent = "";
-  /** Tool status line arbitration (spec issue #19): all `[Tool]: …` writers. */
   private status: StatusChannel;
   private toolMode: "full" | "read-only" = "read-only";
   private _focused = true;
@@ -182,26 +169,18 @@ export class SideChatOverlay implements Component, Focusable {
   private forkLeafId: string | null;
   private peekMainTool: AgentTool;
   private lastRenderHeight = 0;
-  /** Geometry of the last render (screen coords), used for mouse hit-testing. */
   private geometry: ChatGeometry | null = null;
-  /** Pointer gesture state machine (spec #13): press/drag/double-click/right-click classification. */
   private gesture: PointerGesture;
-  /** Visual-space selection over the input editor (spec #24, T3). */
   private editorSelection = new EditorSelectionState();
-  /** Plain (ANSI-stripped) lines of the last editor render's content band. */
   private editorPlainLines: string[] = [];
-  /** Leading messages injected from the main lane at fork time (context cite). */
   private forkedMessageCount: number;
-  /** Tool names allowed in the read-only lane (builtins + allowlist + peek_main). */
   private readOnlyToolNames = new Set<string>();
   /** Open Ctrl+L model picker modal, or null when closed (modal replaces the chat area). */
   private modelPicker: SelectList | null = null;
   /** Choices backing the open picker (index-aligned with its SelectItems). */
   private modelPickerChoices: ModelChoice[] = [];
-  /** Keymap screen modal open flag (issue #35): Ctrl+O opens, Esc closes. */
   private keymapOpen = false;
 
-  /** Chat area height (message lines): delegates to the shared layout module. */
   private computeChatHeight(): number {
     return computeSideChatHeight(this.options.tui.terminal.rows);
   }
@@ -219,22 +198,16 @@ export class SideChatOverlay implements Component, Focusable {
     );
   }
 
-  /** Scroll the message area (positive = toward older content). Mouse wheel handler. */
   scrollByLines(lines: number): boolean {
     const changed = this.messages.scrollBy(lines);
     if (changed) this.options.tui.requestRender();
     return changed;
   }
 
-  /** True while a left-button drag is captured (events stay consumed even off-overlay). */
   isMouseDragging(): boolean {
     return this.gesture.isDragging();
   }
 
-  /**
-   * Abort an in-flight drag without waiting for the release (used when the
-   * overlay is hidden mid-drag and mouse reporting is turned off).
-   */
   cancelMouseDrag(): void {
     this.gesture.cancel();
     this.messages.clearSelection();
@@ -346,13 +319,11 @@ export class SideChatOverlay implements Component, Focusable {
     }
   }
 
-  /** Set the chat selection, clearing the editor selection (cross-surface). */
   private setChatSelection(anchor: CellPos, focus: CellPos): void {
     this.messages.setSelection(anchor, focus);
     this.editorSelection.clear();
   }
 
-  /** Set the editor selection, clearing the chat selection (cross-surface). */
   private setEditorSelection(anchor: EditorPos, focus: EditorPos): void {
     this.editorSelection.setSelection(anchor, focus);
     this.messages.clearSelection();
@@ -481,14 +452,12 @@ export class SideChatOverlay implements Component, Focusable {
   }
 
 
-  /** True when a screen row falls inside the input editor widget band. */
   private isOverEditor(row: number): boolean {
     const g = this.geometry;
     if (!g) return false;
     return row >= g.editorTopRow && row < g.editorTopRow + g.editorHeight;
   }
 
-  /** Map 1-based screen coords to a chat cell position, or null off the chat area. */
   private screenToChat(row: number, col: number): CellPos | null {
     const g = this.geometry;
     if (!g) return null;
@@ -499,7 +468,6 @@ export class SideChatOverlay implements Component, Focusable {
     return { line, col: c };
   }
 
-  /** Like {@link screenToChat} but clamps into the chat area (drag overshoot). */
   private clampScreenToChat(row: number, col: number): CellPos {
     const g = this.geometry;
     if (!g) return { line: 0, col: 0 };
@@ -524,7 +492,6 @@ export class SideChatOverlay implements Component, Focusable {
     return { line, col: c };
   }
 
-  /** Like {@link screenToEditor} but clamps into the editor content band (drag overshoot). */
   private clampScreenToEditor(row: number, col: number): EditorPos {
     const g = this.geometry;
     if (!g) return { line: 0, col: 0 };
@@ -587,9 +554,6 @@ export class SideChatOverlay implements Component, Focusable {
     // The framing block message is marked and skipped by the render path.
     this.messages.setInjectedMessageCount(forkedMessages.length);
 
-    // Tool status line arbitration (spec issue #19): every writer of the
-    // `[Tool]: …` line goes through this channel — steady sources replace
-    // each other, transient toasts flash over them and fall back on expiry.
     this.status = new StatusChannel({
       render: (text) => {
         this.messages.setToolStatus(text);
@@ -632,10 +596,7 @@ export class SideChatOverlay implements Component, Focusable {
         hasSelection: () => this.messages.hasSelection(),
         getSelectionAnchor: () => this.messages.getSelectionAnchor(),
       },
-      // D11: the feature switch gates right-click copy/paste at the module.
       rightClickEnabled: this.options.features.rightClickCopyPaste,
-      // Editor-selection gate (spec #24): off → left-drag never classifies
-      // onto the editor surface; right-click paste is unaffected.
       editorSelectionEnabled: this.options.features.editorSelection,
     });
 
@@ -806,7 +767,6 @@ export class SideChatOverlay implements Component, Focusable {
     return "";
   }
 
-  /** Spinner steady source for the status channel (80ms tick, frame cycle). */
   private spinnerSource(): SteadySourceOptions {
     return {
       tickMs: 80,
@@ -839,16 +799,11 @@ export class SideChatOverlay implements Component, Focusable {
     const trimmed = text.trim();
     if (!trimmed || this.runner.isRunning || this.disposed) return;
 
-    // Keep the framing block's `Model:` line in sync with the fork's current
-    // model (Ctrl+L, D5): the text is substituted once at open time with the
-    // main session's model, so without this refresh the agent self-reports the
-    // old model after a switch (bug #3).
     this.refreshFramingModel();
 
     this.editor.setText("");
     this.editorSelection.clear();
     this.streamingContent = "";
-    // A new user message resumes bottom-following even if the view was frozen.
     this.messages.resumeFollowing();
     this.messages.setStreamingContent("");
     this.messages.setErrorContent("");
@@ -869,12 +824,6 @@ export class SideChatOverlay implements Component, Focusable {
     });
   }
 
-  /**
-   * TurnPhase dispatch (issue #9): the runner owns the turn loop and reports
-   * semantic phases; the overlay maps them onto the existing render surface —
-   * spinner, retry countdown ticker, status line and message batches — the
-   * same way the pre-runner agent events did.
-   */
   private handlePhase(phase: TurnPhase): void {
     if (this.disposed) return;
     switch (phase.kind) {
@@ -906,14 +855,11 @@ export class SideChatOverlay implements Component, Focusable {
         break;
       case "retry-wait":
         // Backoff wait: the countdown ticker replaces the spinner; when the
-        // wait elapses (expiresMs), the channel hands back to the spinner —
-        // the old manual "stop countdown → start spinner" choreography is
-        // gone. The countdown derives from the tick frame (frame × 250ms).
+        // wait elapses (expiresMs), the channel hands back to the spinner.
         // A failed attempt may have streamed partial text without a message_end
         // (transport-level failures cut the stream): drop it here, before the
         // next attempt starts, so the retry never renders stale content
-        // stitched onto fresh output (mirrors the attempt-boundary cleanup
-        // the pre-runner wiring did).
+        // stitched onto fresh output.
         this.streamingContent = "";
         this.messages.setStreamingContent("");
         this.status.setSteady("retry", {
@@ -1134,8 +1080,6 @@ export class SideChatOverlay implements Component, Focusable {
       }
     }
     if (matchesAnyKey(data, KEYBINDINGS.copyLastMessage.keys)) {
-      // app.message.copy parity: copy the last assistant message — no
-      // selection needed (mirrors the main session's Ctrl+X default).
       void this.copyLastAssistantMessage();
       return;
     }
@@ -1187,7 +1131,6 @@ export class SideChatOverlay implements Component, Focusable {
    */
   private openModelPicker(): void {
     if (this.modelPicker) return;
-    // Feature switch (D11): Ctrl+L is inert when model switching is off.
     if (!this.options.features.modelSwitch) return;
     // Editor selection is transient: opening the picker clears it and aborts
     // any in-flight editor drag, so the modal's mouse surface starts clean
@@ -1225,7 +1168,6 @@ export class SideChatOverlay implements Component, Focusable {
       Math.min(items.length, 12),
       getSelectListTheme(),
     );
-    // Preselect the current fork model when it is on the list.
     const currentIndex = choices.findIndex(
       (c) => modelKey(c.model) === modelKey(this.runner.agent.state.model),
     );
@@ -1339,7 +1281,6 @@ export class SideChatOverlay implements Component, Focusable {
         forkedMessageCount: this.forkedMessageCount,
         streaming: this.runner.isRunning,
       });
-      // Status line feedback inside the overlay + a toast in the main session.
       this.status.setSteady("export", {
         text: () => `✓ exported → ${path}`,
       });
@@ -1445,7 +1386,6 @@ function frameLine(
   );
 }
 
-/** Pad/truncate rendered modal content to exactly `maxLines` (stable frame geometry). */
 function padToLines(lines: string[], maxLines: number): string[] {
   while (lines.length < maxLines) lines.push("");
   return lines.slice(0, maxLines);
@@ -1460,7 +1400,6 @@ type HintSegment = readonly [string, ThemeColor];
 
 const HINT_SEP: HintSegment = [" · ", "muted"];
 
-/** Join entries with the ` · ` separator into one styled hint line. */
 function joinHintSegments(
   entries: ReadonlyArray<ReadonlyArray<HintSegment>>,
 ): HintSegment[] {
@@ -1472,18 +1411,15 @@ function joinHintSegments(
   return out;
 }
 
-/** Styled key+label entry for a binding (compact first key / full all keys). */
 function bindingSegments(kb: Keybinding, longForm: boolean): HintSegment[] {
   const { keyText, label } = bindingText(kb, longForm);
   return [[keyText, "dim"], [` ${label}`, "muted"]];
 }
 
-/** Styled literal entry: key dim + label muted, e.g. `Enter send`. */
 function literalSegments(key: string, label: string): HintSegment[] {
   return [[key, "dim"], [` ${label}`, "muted"]];
 }
 
-/** Render one hint line from styled segments. */
 function renderHintLine(
   theme: Theme,
   segments: ReadonlyArray<HintSegment>,

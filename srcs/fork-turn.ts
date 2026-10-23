@@ -69,13 +69,10 @@ export interface ForkTurnRunnerOptions {
    * (D11) — a disabled feature arrives as `enabled: false`.
    */
   retryPolicy: RetryPolicy;
-  /** Resolved prompt texts (focus anchor + lane reminders). */
   promptPack: PromptPack;
   /** Live lane predicate (tool-mode closure; live after Alt+T). */
   isReadOnlyLane: () => boolean;
-  /** Read-only tool-set membership (tool-set closure). */
   isReadOnlyTool: (name: string) => boolean;
-  /** Receives every semantic phase; the overlay maps phases to rendering. */
   onPhase: (phase: TurnPhase) => void;
   /** Test seam; defaults to constructing the real Agent. */
   agentFactory?: (options: AgentOptions) => Agent;
@@ -90,11 +87,8 @@ export class ForkTurnRunner {
    * it is the inherited forked context (GLOSSARY.md: Fork boundary). */
   private readonly forkBoundaryIndex: number;
 
-  /** Out-of-lane attempts in the current turn (reset at the top of run()). */
   private laneViolations = 0;
-  /** Reminder queued for injection by transformContext before the next LLM call. */
   private pendingReminder: string | null = null;
-  /** When true, the turn is aborted right after the escalated reminder is injected. */
   private abortAfterInject = false;
   /** Per-turn retry cancellation (D9): cancel() aborts this so the backoff wait stops. */
   private retryAbortController: AbortController | null = null;
@@ -114,7 +108,6 @@ export class ForkTurnRunner {
     this.agent.subscribe((event) => this.handleAgentEvent(event));
   }
 
-  /** True during both streaming and the retry backoff wait. */
   get isRunning(): boolean {
     return this.running;
   }
@@ -130,7 +123,6 @@ export class ForkTurnRunner {
     const trimmed = text.trim();
     if (!trimmed || this.running) return;
 
-    // Per-turn lane state resets at the top of run().
     this.laneViolations = 0;
     this.pendingReminder = null;
     this.abortAfterInject = false;
@@ -177,7 +169,6 @@ export class ForkTurnRunner {
     }
   }
 
-  /** Esc / overlay dispose: abort the backoff wait and the agent run. */
   cancel(): void {
     this.retryAbortController?.abort();
     this.agent.abort();
@@ -207,7 +198,6 @@ export class ForkTurnRunner {
     return undefined;
   }
 
-  // --- Agent event → phase translation --------------------------------------
 
   private handleAgentEvent(event: AgentEvent): void {
     if (
@@ -243,13 +233,7 @@ export class ForkTurnRunner {
     this.options.onPhase(phase);
   }
 
-  // --- Lane enforcement ------------------------------------------------------
 
-  /**
-   * 1st violation → base reminder; 2nd → escalated wording + abort-after-inject
-   * (the reminder is injected by transformContext before the next LLM call).
-   * Texts come from the prompt pack (#13); UI copy stays in the overlay.
-   */
   private registerLaneViolation(toolName: string): void {
     this.laneViolations += 1;
     const escalated = this.laneViolations >= 2;
@@ -268,7 +252,6 @@ export class ForkTurnRunner {
     this.emit({ kind: "lane", count: this.laneViolations, escalated, tool: toolName });
   }
 
-  // --- Lane hooks (bound by the runner, never by the overlay) ----------------
 
   /**
    * Transient tail injections (present in the LLM request only, never stored in
@@ -343,7 +326,6 @@ export class ForkTurnRunner {
     return { content };
   }
 
-  // --- Transcript helpers (pi _findLastAssistantMessage / _prepareRetry mirrors) --
 
   /**
    * Last assistant message in the fork transcript (pi's

@@ -48,7 +48,6 @@ export interface StatusScheduler {
 }
 
 export interface StatusChannelOptions extends Partial<StatusScheduler> {
-  /** Receives the text that should currently be displayed. */
   render: (text: string) => void;
   /** Clock (test seam; defaults to Date.now). */
   now?: () => number;
@@ -116,7 +115,6 @@ export class StatusChannel {
     this.paint();
   }
 
-  /** Clear everything: steady source, ticker, flash and all timers. */
   reset(): void {
     this.stopSteadyTimer();
     this.stopFlashTimer();
@@ -125,7 +123,6 @@ export class StatusChannel {
     this.paint();
   }
 
-  /** Stop the steady-source ticker, if any. */
   private stopSteadyTimer(): void {
     if (this.steadyTimer) {
       this.options.clearInterval(this.steadyTimer);
@@ -133,7 +130,6 @@ export class StatusChannel {
     }
   }
 
-  /** Clear the in-flight flash timer, if any. */
   private stopFlashTimer(): void {
     if (this.flashTimer) {
       this.options.clearTimeout(this.flashTimer);

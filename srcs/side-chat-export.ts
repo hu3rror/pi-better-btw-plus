@@ -13,27 +13,22 @@ import { isFramingMessage } from "./side-chat-messages.ts";
 
 export interface ExportSideChatOptions {
   messages: AgentMessage[];
-  /** Current working directory — the `.agents/eval/` dir is created under it. */
   cwd: string;
   modelId: string;
   toolMode: "full" | "read-only";
-  /** Number of leading messages injected from the main lane (fork context). */
   forkedMessageCount: number;
-  /** Whether the agent was mid-stream when the export was requested. */
   streaming: boolean;
   /** In-flight assistant text at export time (included as a pseudo message). */
   streamingContent?: string;
   exportedAt?: Date;
 }
 
-/** Local `YYYY-MM-DD HH:mm:ss` for headers. */
 function formatTimestamp(timestamp: number | Date): string {
   const d = typeof timestamp === "number" ? new Date(timestamp) : timestamp;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** Local `YYYYMMDD-HHmmss` for the export filename. */
 function formatFileTimestamp(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
@@ -54,10 +49,8 @@ function formatJson(value: unknown): string {
   }
 }
 
-/** Content block union of the LLM message roles (text/thinking/image/toolCall). */
 type ContentBlock = { type: string } & Record<string, unknown>;
 
-/** Render one content block into markdown lines (text/thinking/image/toolCall). */
 function formatBlock(block: ContentBlock, lines: string[]) {
   switch (block.type) {
     case "text":
@@ -86,7 +79,6 @@ function formatBlock(block: ContentBlock, lines: string[]) {
   }
 }
 
-/** Extract the text of a message content (string or blocks) as markdown lines. */
 function formatContent(content: string | ContentBlock[], lines: string[]) {
   if (typeof content === "string") {
     lines.push(content);
@@ -97,7 +89,6 @@ function formatContent(content: string | ContentBlock[], lines: string[]) {
   }
 }
 
-/** Role emoji + display label used in the message heading. */
 function roleLabel(msg: AgentMessage): string {
   switch (msg.role) {
     case "user":
@@ -192,13 +183,11 @@ function renderMessage(
   return lines;
 }
 
-/** Build the full markdown transcript document. */
 export function buildExportMarkdown(opts: ExportSideChatOptions): string {
   const exportedAt = opts.exportedAt ?? new Date();
   const messages = opts.messages;
   const total = messages.length;
 
-  // Segment split: forked main-lane context → framing block → btw conversation.
   const forked = messages.slice(
     0,
     Math.max(0, Math.min(opts.forkedMessageCount, total)),
@@ -260,7 +249,6 @@ export function buildExportMarkdown(opts: ExportSideChatOptions): string {
     }
   }
 
-  // Mid-stream snapshot: append the in-flight assistant text as a pseudo message.
   if (opts.streaming && opts.streamingContent) {
     lines.push("---", "");
     lines.push(

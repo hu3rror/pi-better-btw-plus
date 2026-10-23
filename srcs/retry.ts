@@ -2,15 +2,11 @@
  * Turn-level retry engine (issue #6, D9 seam): the classifier and the
  * injectable retry loop the fork's turn cycle wraps around `agent.prompt()`.
  *
- * The engine mirrors pi's turn retry semantics verbatim — classification
- * patterns are transcribed from `@earendil-works/pi-ai@1.3.0` (see
- * `dist/utils/retry.js` and `dist/utils/overflow.js`, themselves the pieces
- * pi-coding-agent 1.3.0's `agent-session` classifies with; the tables were
- * re-synced against `@earendil-works/pi-ai@1.4.0` in the 2026 maintenance pass
- * (see the sync report). The tables are copied
- * here (with their source annotations) rather than imported so the engine
- * stays a pure, pi-runtime-free module driven by fakes in tests —
- * "照抄语义，不发明私有协议".
+ * The engine mirrors pi's turn retry semantics verbatim — the classification
+ * tables are copied here (with their source annotations) rather than imported
+ * so the engine stays a pure, pi-runtime-free module driven by fakes in
+ * tests — "照抄语义，不发明私有协议". Table re-syncs against pi are
+ * recorded in the ADR trail (ADR 0007–0016).
  *
  * The loop is fully injected so tests drive it with a fake agent (scripted
  * attempt results) and a fake clock (recorded delays); the engine itself has
@@ -25,9 +21,6 @@ export interface RetryableFailure {
   usage?: { input?: number; output?: number; cacheRead?: number };
 }
 
-// =============================================================================
-// Classifier (pi-ai 1.4.0 semantics)
-// =============================================================================
 
 /** Non-retryable provider limit / billing exhaustion patterns (pi retry.js). */
 function buildProviderErrorPattern(patterns: string[]): RegExp {
@@ -199,10 +192,8 @@ const NON_OVERFLOW_PATTERNS = [
   /too many requests/i, // Generic HTTP 429 style
 ];
 
-/** Anything the classifier can be handed: a message-shaped failure, an Error, or text. */
 export type RetryableInput = RetryableFailure | Error | string | null | undefined;
 
-/** Normalize loose error shapes to the assistant-message shape pi classifies. */
 function toRetryableFailure(error: RetryableInput): RetryableFailure | null {
   if (error == null) return null;
   if (typeof error === "string") return { stopReason: "error", errorMessage: error };
@@ -213,7 +204,6 @@ function toRetryableFailure(error: RetryableInput): RetryableFailure | null {
 
 /** isContextOverflow mirror (pi-ai 1.4.0 dist/utils/overflow.js). */
 function isContextOverflow(message: RetryableFailure, contextWindow?: number): boolean {
-  // Case 1: error-message patterns.
   if (message.stopReason === "error" && message.errorMessage) {
     const isNonOverflow = NON_OVERFLOW_PATTERNS.some((p) =>
       p.test(message.errorMessage as string),
@@ -269,11 +259,7 @@ export function classifyRetryable(
   return isRetryableAssistantError(failure);
 }
 
-// =============================================================================
-// Retry loop
-// =============================================================================
 
-/** The `settings.retry` budget/backoff block, same shape pi reads. */
 export interface RetryPolicy {
   enabled: boolean;
   maxRetries: number;
@@ -294,16 +280,13 @@ export interface RetryPolicy {
   provider?: ProviderRetrySettings;
 }
 
-/** Status payload for `onAttempt`, emitted before each backoff wait. */
 export interface RetryAttemptInfo {
   /** Retry number, 1-based (the n-th retry after the original failed attempt). */
   attempt: number;
-  /** Total retry budget (`policy.maxRetries`). */
   maxAttempts: number;
   /** Backoff for this retry: `baseDelayMs * 2^(attempt-1)`, capped at
    * `maxAgentDelayMs` (default 60s). */
   delayMs: number;
-  /** Error text of the failed result. */
   errorMessage: string;
 }
 
@@ -326,7 +309,6 @@ export interface RunWithRetryOptions {
   signal?: AbortSignal;
   /** Called before each backoff wait (e.g. to render "Retrying (attempt n)…"). */
   onAttempt?: (info: RetryAttemptInfo) => void | Promise<void>;
-  /** Retry budget + backoff base (`settings.retry` shape). */
   policy: RetryPolicy;
 }
 

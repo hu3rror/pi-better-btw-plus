@@ -18,7 +18,6 @@ export interface PromptPackManifest {
   };
 }
 
-/** Fully resolved prompt texts after manifest resolution + file reads. */
 export interface PromptPack {
   framing: string;
   focusAnchor: string;

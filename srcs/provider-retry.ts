@@ -28,7 +28,6 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 
-/** The `settings.retry.provider` block (D4): HTTP-layer retry knobs. */
 export interface ProviderRetrySettings {
   timeoutMs?: number;
   maxRetries?: number;
@@ -55,18 +54,12 @@ function hasInjectableKeys(
   return PROVIDER_RETRY_KEYS.some((key) => settings[key] !== undefined);
 }
 
-/**
- * Wrap `streamFn` so that missing provider-retry options are filled from
- * `settings` (caller-provided options always win, `??` order — mirrors pi's
- * sdk.js streamFn chain). With no settings / no injectable keys, returns the
- * original function reference (identity, D3).
- */
 export function injectProviderRetry(
   streamFn: ProviderStreamFn,
   settings: ProviderRetrySettings | undefined,
 ): ProviderStreamFn {
   if (!hasInjectableKeys(settings)) return streamFn;
-  const injected = settings; // narrowed by the guard; has ≥1 injectable key
+  const injected = settings;
   return (model, context, options) =>
     streamFn(model, context, {
       ...options,

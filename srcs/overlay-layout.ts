@@ -13,10 +13,6 @@
  */
 import type { OverlayAnchor, OverlayOptions, SizeValue } from "@earendil-works/pi-tui";
 
-/**
- * The side chat's overlay options — the single layout spec. Consumed verbatim
- * by index.ts (ui.custom overlayOptions) and by the geometry functions below.
- */
 export const LAYOUT: OverlayOptions = {
   width: "85%",
   maxHeight: "88%",
@@ -50,7 +46,6 @@ export interface ChatGeometry {
   editorHeight: number;
 }
 
-/** Screen band the overlay occupies, used to route mouse events to the chat. */
 export interface OverlayViewport {
   topRow: number;
   height: number;
@@ -177,17 +172,14 @@ export function resolveLayout(
   const availWidth = Math.max(1, termWidth - marginLeft - marginRight);
   const availHeight = Math.max(1, termHeight - marginTop - marginBottom);
 
-  // width: parse, then minWidth, then clamp to available space.
   let width = parseSizeValue(options.width, termWidth) ?? Math.min(80, availWidth);
   if (options.minWidth !== undefined) width = Math.max(width, options.minWidth);
   width = Math.max(1, Math.min(width, availWidth));
 
-  // maxHeight + effective overlay height (clamped by maxHeight).
   const maxHeight = resolveOverlayMaxHeight(options, termHeight);
   const effectiveHeight =
     maxHeight !== undefined ? Math.min(frameHeight, maxHeight) : frameHeight;
 
-  // row: explicit (percent/absolute) or anchor-based.
   let row: number;
   if (options.row !== undefined) {
     if (typeof options.row === "string") {
@@ -205,7 +197,6 @@ export function resolveLayout(
     row = resolveAnchorRow(options.anchor ?? "center", effectiveHeight, availHeight, marginTop);
   }
 
-  // col: explicit (percent/absolute) or anchor-based.
   let col: number;
   if (options.col !== undefined) {
     if (typeof options.col === "string") {
@@ -223,7 +214,6 @@ export function resolveLayout(
     col = resolveAnchorCol(options.anchor ?? "center", width, availWidth, marginLeft);
   }
 
-  // Offsets, then clamp to terminal bounds (respecting margins).
   if (options.offsetY !== undefined) row += options.offsetY;
   if (options.offsetX !== undefined) col += options.offsetX;
   row = Math.max(marginTop, Math.min(row, termHeight - marginBottom - effectiveHeight));

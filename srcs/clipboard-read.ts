@@ -1,28 +1,3 @@
-/**
- * Clipboard reader (D3, issue #4): read plain text from the system clipboard
- * with an injected platform-channel matrix and level-by-level fallback.
- *
- * The write side is pi's own `copyToClipboard` (public export); the read side
- * is self-built because `readClipboardText` is not re-exported from the
- * package entry. The PRIMARY channel reads through pi-tui's
- * `getNativeClipboard()` (pi 1.3.0's bundled native helper — the same one
- * the main session's `readClipboardText` uses); the remaining channels —
- * PowerShell `Get-Clipboard -Raw` (win32), `pbpaste` (darwin), and an OSC 52
- * query — are extension-only fallbacks pi's read side does not have:
- *
- *   - win32  → native helper `getText`, then PowerShell `Get-Clipboard -Raw`,
- *     then an OSC 52 query;
- *   - darwin → native helper `getText`, then `pbpaste`, then OSC 52 query;
- *   - linux  → native helper `getText` when an X11 display is available
- *     (`getNativeClipboard()` returns undefined without `DISPLAY`), then the
- *     OSC 52 query.
- *
- * Channels are injected functions, so tests mock success / fallback /
- * all-fail without touching the host clipboard. The reader never throws:
- * a broken channel falls through to the next one and total failure resolves
- * to `{ ok: false, reason: "unavailable" }` — whether to surface a hint is
- * the caller's decision.
- */
 import { spawnSync } from "node:child_process";
 
 import {
@@ -39,7 +14,6 @@ export type ClipboardReadOutcome =
   | { ok: true; text: string }
   | { ok: false; reason: "empty" | "unavailable" };
 
-/** A single clipboard read channel. */
 export interface ClipboardReadChannel {
   /** Channel identity for diagnostics and ordering assertions. */
   readonly name: string;
@@ -51,7 +25,6 @@ export interface ClipboardReadChannel {
   readonly read: () => Promise<ClipboardReadOutcome>;
 }
 
-/** Result of running one subprocess-based channel. */
 export interface ExecResult {
   ok: boolean;
   stdout: string;
@@ -70,7 +43,6 @@ export type ExecFn = (
   options: ExecOptions,
 ) => ExecResult;
 
-/** Default subprocess runner: synchronous, mirrors pi's `runCommand`. */
 export function defaultExec(
   command: string,
   args: readonly string[],
@@ -106,13 +78,11 @@ export async function readClipboardText(
       if (outcome.ok) return outcome;
       if (outcome.reason === "empty") return outcome;
     } catch {
-      // Fall through to the next channel.
     }
   }
   return { ok: false, reason: "unavailable" };
 }
 
-/** Strip the single trailing newline CLI tools append to their output. */
 function stripOneTrailingNewline(text: string): string {
   if (text.endsWith("\r\n")) return text.slice(0, -2);
   if (text.endsWith("\n")) return text.slice(0, -1);
@@ -140,7 +110,6 @@ export interface CommandChannelOptions {
 const PS_GET_CLIPBOARD_SCRIPT =
   "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw";
 
-/** Shared shape of the subprocess-based channels: run → strip → outcome. */
 function makeCommandChannel(
   name: string,
   command: string,
@@ -169,10 +138,6 @@ function makeCommandChannel(
   };
 }
 
-/**
- * The slice of pi-tui's {@link NativeClipboard} the read path consumes
- * (injected narrow slice: the channel never touches `getImage`/`setText`).
- */
 export type NativeClipboardReader = Pick<NativeClipboard, "getText">;
 
 /**
@@ -230,13 +195,6 @@ export function makeNativeChannel(
   };
 }
 
-/**
- * PowerShell read fallback (extension-only; pi's readClipboardText has no
- * PowerShell channel): `powershell.exe -NoProfile -Command "Get-Clipboard
- * -Raw"`. The `-Raw` flag preserves the exact text (no extra newline), and the
- * output encoding is pinned to UTF-8 because the text travels over the console
- * pipe.
- */
 export function makePowerShellChannel(
   options: CommandChannelOptions = {},
 ): ClipboardReadChannel {
@@ -261,7 +219,6 @@ export const OSC52_QUERY = "\x1b]52;c;?\x07";
 /** Terminal reply envelope: `\x1b]52;c;<base64>` ended by BEL or ST. */
 const OSC52_REPLY_RE = /\x1b\]52;c;([^\x07\x1b]*)(?:\x07|\x1b\\)/;
 
-/** Base64 payload guard (terminal replies are always well-formed). */
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /** Decode an OSC 52 base64 payload; null for empty / echoed / malformed. */
@@ -292,12 +249,6 @@ export function parseOsc52Reply(raw: string): string | null {
 export interface Osc52ChannelOptions {
   /** Query writer override (tests). Defaults to `process.stdout.write`. */
   write?: (sequence: string) => void;
-  /**
-   * Reply reader override (tests). Defaults to a best-effort
-   * `process.stdin` listener with a timeout. The overlay integration
-   * (right-click paste, C2) may supply its own reader that intercepts the
-   * reply before pi-tui's StdinBuffer sees it.
-   */
   readReply?: (timeoutMs: number) => Promise<string | null>;
   timeoutMs?: number;
 }
@@ -372,14 +323,6 @@ export interface PlatformChannelsOptions {
   /** Native clipboard loader override (tests). Defaults to the real loader. */
   loadNative?: () => NativeClipboardReader | undefined;
 }
-/**
- * The per-platform channel matrix (primary first, then fallbacks). win32 /
- * darwin lead with the native helper, fall back to their platform tool, then
- * to an OSC 52 query; linux leads with the native helper when an X11 display
- * is available (`getNativeClipboard()` gates on `DISPLAY`) and queries OSC 52
- * otherwise; unknown platforms query OSC 52 directly — mirroring the
- * write-side cascade where OSC 52 is the universal last resort.
- */
 export function buildPlatformChannels(
   options: PlatformChannelsOptions = {},
 ): ClipboardReadChannel[] {
@@ -407,7 +350,6 @@ export function buildPlatformChannels(
   }
 }
 
-/** Read the clipboard with the current platform's channel matrix. */
 export function readClipboardTextFromSystem(
   options: PlatformChannelsOptions = {},
 ): Promise<ClipboardReadOutcome> {

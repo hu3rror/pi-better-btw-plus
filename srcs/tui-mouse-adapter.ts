@@ -58,6 +58,6 @@ export function translateTuiMouseEvent(event: TuiMouseEvent): SgrMouseEvent | nu
       return null;
     }
     default:
-      return null; // move / click: absorbed, never fed to the classifier
+      return null;
   }
 }

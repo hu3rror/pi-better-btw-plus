@@ -26,7 +26,6 @@ import {
   parseSgrMouseEvent,
 } from "./side-chat-mouse.ts";
 import { extractWritePaths } from "./write-paths.ts";
-// Patch to capture the runner instance for extension tool access in side chat.
 let capturedRunner: ExtensionRunner | null = null;
 // Patch once (module reloads re-execute this file; re-patching would nest the
 // wrapper one level per /reload and eventually blow the stack). The marker
@@ -54,8 +53,6 @@ if (!(ExtensionRunner.prototype as unknown as Record<symbol, unknown>)[RUNNER_CA
 
 function getExtensionAgentTools(): AgentTool[] {
   if (!capturedRunner) return [];
-  // pi's official RegisteredTool → AgentTool adapter (runner.createContext() +
-  // dynamic-tool `addedToolNames` tracking) — replaces the hand-rolled mapping.
   return wrapRegisteredTools(capturedRunner.getAllRegisteredTools(), capturedRunner);
 }
 
@@ -70,7 +67,6 @@ function logOpenFailure(error: unknown): void {
   console.error("[btw] failed to open side chat:", error);
 }
 
-/** Extension directory: base for the bundle config.json and prompt-pack paths. */
 const extensionDir = getExtensionDir();
 
 export default function sideChatExtension(pi: ExtensionAPI) {
@@ -87,11 +83,6 @@ export default function sideChatExtension(pi: ExtensionAPI) {
    * extension owns the stream, unchanged. */
   let mouseReportingOwnedByPi = false;
 
-  /**
-   * Write reporting sequences only while the extension owns the stream
-   * (regular mode). In fullscreen they are never written at all; overlay
-   * visibility already gates pi's own dispatch, no toggling needed.
-   */
   const writeMouseReporting = (on: boolean) => {
     if (!mouseTerminal) return;
     if (mouseReportingOwnedByPi) return;
@@ -99,14 +90,6 @@ export default function sideChatExtension(pi: ExtensionAPI) {
     else disableMouseReporting(mouseTerminal);
   };
 
-  /**
-   * Enable xterm mouse reporting + SGR while the side chat is open and route
-   * overlay events (wheel scroll, drag-select, copy) to the chat. Mouse
-   * sequences are always consumed so they never leak into the editor as
-   * garbage input. (In fullscreen mode the alt-screen handler already
-   * consumed every SGR sequence before us, so this branch only fires in
-   * regular mode.)
-   */
   const installMouseHandler = (tui: TUI) => {
     if (removeMouseListener) return;
     mouseReportingOwnedByPi = tui.mode === "fullscreen";
@@ -132,8 +115,6 @@ export default function sideChatExtension(pi: ExtensionAPI) {
           // A press on the chat focuses the overlay, so the subsequent
           // Ctrl+C / Ctrl+Shift+C lands in the overlay (not the main editor)
           // and re-copies the selection.
-          // A press on the chat focuses the overlay (single classification
-          // source: isLeftPress, shared with the gesture module).
           if (isLeftPress(event)) {
             overlayHandle?.focus();
           }
@@ -176,24 +157,21 @@ export default function sideChatExtension(pi: ExtensionAPI) {
     }
   };
 
-  /** Restore a hidden overlay to the foreground and re-enable mouse reporting. */
   const restoreOverlay = (handle: OverlayHandle) => {
     handle.setHidden(false);
     handle.focus();
     syncMouseReporting();
   };
 
-  /** Background a visible overlay: release focus, hide, and disable mouse reporting. */
   const hideOverlay = (handle: OverlayHandle) => {
     handle.unfocus();
     handle.setHidden(true);
     syncMouseReporting();
   };
 
-  /** Toggle the side chat between hidden (backgrounded) and visible. Opens it if needed. */
   const backgroundSideChat = async (ctx: ExtensionContext) => {
     if (!activeOverlay) {
-      void openSideChat(ctx).catch(logOpenFailure); // fire-and-forget, see toggleSideChat
+      void openSideChat(ctx).catch(logOpenFailure);
       return;
     }
     const handle = overlayHandle;
@@ -217,14 +195,9 @@ export default function sideChatExtension(pi: ExtensionAPI) {
       const handle = overlayHandle;
       if (!handle) return;
       if (handle.isHidden()) {
-        // Hidden in the background: restore and focus.
         restoreOverlay(handle);
         return;
       }
-      // The Alt+/ focus toggle was dropped (Alt+W owns background/restore):
-      // the open key only ever brings the chat to the front — a visible but
-      // unfocused overlay (e.g. after a mouse refocus) comes back this way,
-      // and pressing it while focused is a no-op.
       if (!handle.isFocused()) {
         handle.focus();
       }
@@ -257,24 +230,15 @@ export default function sideChatExtension(pi: ExtensionAPI) {
       ctx.sessionManager.getEntries(),
       ctx.sessionManager.getLeafId(),
     );
-    // Layered config (#18): bundle <ExtensionDir>/config.json defaults, then
-    // ~/.pi/agent/pi-better-btw/config.json (user), then
-    // <cwd>/.pi/pi-better-btw/config.json (project) — allowlists union,
-    // promptPack merges per key.
-    // Read fresh at every open (no cache), consistent with the prompt pack.
     const config = loadConfig({
       extensionDir,
       cwd: ctx.cwd,
       onWarning: (message) => ctx.ui.notify(message, "warning"),
     });
-    // Retry budget (#8, D8): pi's own settings.retry (global settings.json
-    // merged with <cwd>/.pi/settings.json), read fresh at every fork.
     const retryPolicy = loadRetryPolicy({
       cwd: ctx.cwd,
       onWarning: (message) => ctx.ui.notify(message, "warning"),
     });
-    // Prompt pack (#13): read fresh at every fork (no cache) so edits to the
-    // manifest files apply on the next fork; per-key fallback + notify.
     const promptPack = loadPromptPack(config.promptPack, {
       extensionDir,
       notify: (message) => ctx.ui.notify(message, "warning"),

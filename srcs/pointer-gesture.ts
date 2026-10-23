@@ -103,7 +103,6 @@ export interface PointerHit {
   chatAt(row: number, col: number): CellPos | null;
   /** Like chatAt but clamps into the chat area (drag overshoot). */
   clampToChat(row: number, col: number): CellPos;
-  /** True when a screen row falls inside the input editor widget band. */
   overEditor(row: number, col: number): boolean;
   /** Map a screen position to an editor visual cell, or null off the editor content band. */
   editorAt(row: number, col: number): EditorPos | null;
@@ -113,9 +112,7 @@ export interface PointerHit {
   hasSelection(): boolean;
   /** The current chat selection anchor (window coordinates), or null when no selection. */
   getSelectionAnchor(): CellPos | null;
-  /** True when a non-empty editor selection is active. */
   hasEditorSelection(): boolean;
-  /** The current editor selection anchor, or null when no selection. */
   getEditorSelectionAnchor(): EditorPos | null;
 }
 
@@ -125,7 +122,6 @@ export interface PointerGestureOptions {
   rightClickEnabled?: boolean;
   /** Editor-selection gate (spec #24): when false, left presses never classify onto the editor surface. */
   editorSelectionEnabled?: boolean;
-  /** Wheel scroll step in lines (default 3, matching the previous mouse handler). */
   wheelScrollLines?: number;
   /** Clock for the click-count window and drag throttle (test seam; defaults to Date.now). */
   now?: () => number;
@@ -137,11 +133,8 @@ export interface PointerGestureOptions {
  * lives in the overlay, the module knows nothing about the modal).
  */
 export class PointerGesture {
-  /** Options with defaults already merged in (rightClickEnabled / editorSelectionEnabled / wheelScrollLines / now). */
   private readonly options: Required<PointerGestureOptions>;
-  /** Set while a left-button selection drag is in progress. */
   private dragging = false;
-  /** The surface the in-flight left drag is on (null when not dragging). */
   private surface: Surface | null = null;
   /** Right-press landed in the chat area; the copy action fires on release there. */
   private rightPressInChat = false;
@@ -152,11 +145,9 @@ export class PointerGesture {
   private lastPressPos: CellPos | null = null;
   /** The surface of the last press (a surface change resets the click count). */
   private lastPressSurface: Surface | null = null;
-  /** Consecutive-click count of the current series (1–3), resolved at press time. */
   private clickCount = 1;
   /** The last release ended a drag; a quick follow-up click must not count as a multi-click. */
   private lastReleaseWasDrag = false;
-  /** Timestamp of the last paint-triggering drag motion (coalescing). */
   private lastDragRenderAt = 0;
 
   constructor(options: PointerGestureOptions) {
@@ -169,7 +160,6 @@ export class PointerGesture {
     };
   }
 
-  /** Clamp a screen position into the active surface's coordinate space. */
   private clampTo(surface: Surface, row: number, col: number): CellPos {
     const { hit } = this.options;
     return surface === "chat"
@@ -177,12 +167,6 @@ export class PointerGesture {
       : hit.clampToEditor(row, col);
   }
 
-  /**
-   * Read the selection anchor back from the active surface's store. The
-   * authoritative copy of the chat anchor lives in SideChatMessages
-   * (window-shift translation moves it mid-drag), so the module reads it back
-   * instead of hoarding a private copy; the editor anchor needs no shift.
-   */
   private selectionAnchor(surface: Surface): CellPos {
     const { hit } = this.options;
     const anchor =
@@ -192,14 +176,12 @@ export class PointerGesture {
     return anchor ?? this.mouseAnchor;
   }
 
-  /** True when the active surface holds a non-empty selection. */
   private hasSelection(surface: Surface): boolean {
     return surface === "chat"
       ? this.options.hit.hasSelection()
       : this.options.hit.hasEditorSelection();
   }
 
-  /** Classify one SGR mouse event and return the actions it produces. */
   onEvent(event: SgrMouseEvent): GestureAction[] {
     const {
       hit,
@@ -232,10 +214,6 @@ export class PointerGesture {
         return [];
       }
       const now = this.options.now();
-      // Consecutive-click classification (spec #24/#26): the click count
-      // advances only when this press lands on the same surface, within the
-      // double-click window and tolerance, and the previous release was not a
-      // drag. Any of those failing resets the count to a fresh single click.
       const isMultiClick =
         this.lastPressPos !== null &&
         this.lastPressSurface === surface &&
@@ -261,8 +239,6 @@ export class PointerGesture {
       const surface = this.surface ?? "chat";
       const pos = this.clampTo(surface, event.row - 1, event.col - 1);
       const anchor = this.selectionAnchor(surface);
-      // Coalesce drag paints: the selection state is always current (the next
-      // render picks it up), only the number of full-frame redraws is capped.
       const now = this.options.now();
       const paint = now - this.lastDragRenderAt >= DRAG_RENDER_INTERVAL_MS;
       if (paint) this.lastDragRenderAt = now;
@@ -290,22 +266,15 @@ export class PointerGesture {
       }
 
       if (clickCount === 3) {
-        // Triple-click: select the whole rendered/visual line on both surfaces.
         this.lastReleaseWasDrag = false;
         return [{ kind: "selectLine", surface, line: pos.line }];
       }
 
-      // clickCount === 1: a single press — either finalize a drag or end a click.
       if (this.hasSelection(surface)) {
         // Drag-release: finalize the selection (the anchor may have been
         // window-shifted by appended status/stream lines mid-drag). The
         // selection stays highlighted so Ctrl+C copies it (hotkey-only copy).
         const anchor = this.selectionAnchor(surface);
-        // A selection that ends within the double-click tolerance is a click
-        // with hand shake, not a drag: real terminals report motion (button 32)
-        // even for 1-cell moves, so without this the tiniest movement while
-        // multi-clicking marks the release as a drag and the next press is
-        // never classified as a multi-click (bug: line/word-select never fires).
         this.lastReleaseWasDrag = !selectionWithinClickTolerance(anchor, pos);
         return [{ kind: "select", surface, anchor, focus: pos, paint: true }];
       }
@@ -330,11 +299,6 @@ export class PointerGesture {
     }
 
     if (isRightRelease(event)) {
-      // Right-click (release-triggered), one shared hit branch: a press+release
-      // over the chat area with an active mouse selection copies it; a
-      // press+release over the input editor pastes the system clipboard. The
-      // release position decides — pressing in one area and releasing in the
-      // other does nothing, and a release elsewhere (header/border) is ignored.
       const pressInChat = this.rightPressInChat;
       const pressInEditor = this.rightPressInEditor;
       this.rightPressInChat = false;

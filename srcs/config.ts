@@ -5,36 +5,7 @@ import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { PromptPackManifest } from "./prompt-pack.ts";
 import type { ProviderRetrySettings } from "./provider-retry.ts";
 import type { RetryPolicy } from "./retry.ts";
-/**
- * Layered config resolution for pi-better-btw.
- *
- * Sources, in increasing precedence (a layer only contributes keys it
- * actually defines — absent/invalid keys fall through to the layer below):
- *
- *   1. bundle   — <extensionDir>/config.json            (shipped defaults)
- *   2. user     — ~/.pi/agent/pi-better-btw/config.json (personal defaults)
- *   3. project  — <cwd>/.pi/pi-better-btw/config.json   (per-project overrides)
- *
- * Merge semantics:
- * - `readOnlyExtensionAllowlist` is UNIONED across layers in bundle → user →
- *   project order (deduped, first occurrence wins). A higher layer adds tools,
- *   it never drops the defaults shipped below it.
- * - `readOnlyExtensionAllowlistExclude` removes names from the final list, so
- *   a bundled default can be dropped explicitly.
- * - `promptPack` merges per leaf key (framing / focusAnchor / each lane
- *   reminder), higher layer wins; relative paths resolve against the layer's
- *   own directory (so a user-level manifest may live next to the user config).
- *
- * Loaded fresh at every side-chat open — no caching, so edits to any layer
- * apply on the next open (same philosophy as the prompt pack).
- */
 
-/**
- * Per-feature kill switches (D11). Each defaults to true; a layer only
- * overrides the keys it defines, so a user can disable one behavior without
- * touching the others (or the bundle defaults). Read-only here — the
- * switches are resolved at every side-chat open, like the rest of the config.
- */
 export interface SideChatFeatures {
   /** Right-click copy (chat selection) / paste (editor). Default: true. */
   rightClickCopyPaste: boolean;
@@ -58,11 +29,8 @@ export interface SideChatConfig {
 }
 
 export interface LoadConfigOptions {
-  /** Directory of the extension bundle (base for the bundle config.json). */
   extensionDir: string;
-  /** Current working directory; project layer is skipped when absent. */
   cwd?: string;
-  /** User config dir override (tests). Defaults to ~/.pi/agent/pi-sidechat. */
   userConfigDir?: string;
   /** Surfaces config problems (invalid JSON) instead of logging to console. */
   onWarning?: (message: string) => void;
@@ -86,9 +54,7 @@ export const AGENT_CONFIG_DIR = join(homedir(), ".pi", "agent");
  * settings file warns and contributes nothing (pi's own fallback).
  */
 export interface LoadRetryPolicyOptions {
-  /** Agent config dir holding pi's global settings.json (~/.pi/agent). */
   agentConfigDir?: string;
-  /** cwd for the project layer (<cwd>/.pi/settings.json); skipped when absent. */
   cwd?: string;
   onWarning?: (message: string) => void;
 }
@@ -103,8 +69,6 @@ export function loadRetryPolicy(options: LoadRetryPolicyOptions = {}): RetryPoli
   const settings = SettingsManager.create(options.cwd ?? process.cwd(), agentConfigDir, {
     projectTrusted: true,
   });
-  // Surface load errors (invalid JSON etc.) through the caller's warning hook,
-  // mirroring the old loader's present-but-unreadable → warn behavior.
   for (const err of settings.drainErrors()) {
     options.onWarning?.(`pi-better-btw: ignoring invalid settings (${err.scope})`);
   }
@@ -145,7 +109,6 @@ interface ConfigLayer {
   readOnlyExtensionAllowlist: string[] | undefined;
   readOnlyExtensionAllowlistExclude: string[] | undefined;
   promptPack: PromptPackManifest | undefined;
-  /** Feature switches this layer actually defines (undefined = falls through). */
   features: Partial<SideChatFeatures> | undefined;
 }
 
@@ -157,12 +120,10 @@ function parseStringArray(value: unknown): string[] | undefined {
   return names.length > 0 ? names : undefined;
 }
 
-/** Boolean feature switch; non-boolean values are ignored (fall through). */
 function parseBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
 }
 
-/** Resolve a prompt-pack path against the layer's dir; non-strings stay undefined. */
 function resolvePath(value: unknown, dir: string): string | undefined {
   if (typeof value !== "string") return undefined;
   return isAbsolute(value) ? value : join(dir, value);
@@ -222,7 +183,6 @@ function parseConfigLayer(raw: unknown, dir: string): ConfigLayer {
   };
 }
 
-/** Read one config file; absent or invalid JSON contributes nothing (with a warning). */
 function readLayer(
   path: string,
   dir: string,
@@ -240,7 +200,6 @@ function readLayer(
   }
 }
 
-/** Union allowlists bundle → user → project, then apply excludes. */
 function mergeAllowlists(layers: ConfigLayer[]): string[] {
   const names: string[] = [];
   for (const layer of layers) {
@@ -256,7 +215,6 @@ function mergeAllowlists(layers: ConfigLayer[]): string[] {
   return names.filter((name) => !excluded.has(name));
 }
 
-/** Per-leaf-key promptPack merge, higher layer wins; undefined when nothing defined. */
 function mergePromptPacks(
   layers: ConfigLayer[],
 ): PromptPackManifest | undefined {
@@ -291,11 +249,6 @@ function mergePromptPacks(
   return defined ? merged : undefined;
 }
 
-/**
- * Feature switches merge per leaf key, higher layer wins; keys no layer
- * defines keep their default (true). A layer can disable one behavior
- * (`"retry": false`) without re-declaring the others.
- */
 const FEATURE_KEYS = [
   "rightClickCopyPaste",
   "modelSwitch",
