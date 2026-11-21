@@ -148,7 +148,7 @@ export function orderedEnd(sel: EditorSelection): EditorPos {
  * rows dropped, ANSI stripped, and trailing padding trimmed. Assumes the
  * overlay's editor config (`paddingX: 0`), so padding is trailing only.
  */
-export function contentBandPlainLines(rendered: string[]): string[] {
+export function contentBandPlainLines(rendered: readonly string[]): string[] {
   return rendered.slice(1, -1).map((l) => stripTerminalSequences(l).trimEnd());
 }
 
@@ -276,12 +276,12 @@ export function lineSelection(
  * gates selection off while the popup is open — ADR 0006).
  */
 export function decorateEditorSelection(
-  rendered: string[],
+  rendered: readonly string[],
   sel: EditorSelection,
 ): string[] {
   const plain = contentBandPlainLines(rendered);
   const ranges = highlightRanges(plain, sel);
-  if (ranges.length === 0) return rendered;
+  if (ranges.length === 0) return rendered.slice();
   const out = rendered.slice();
   for (const r of ranges) {
     const text = plain[r.line];
@@ -340,7 +340,7 @@ export class EditorSelectionState {
     return this.selection ? selectedText(plainLines, this.selection) : "";
   }
 
-  decorate(rendered: string[]): string[] {
-    return this.selection ? decorateEditorSelection(rendered, this.selection) : rendered;
+  decorate(rendered: readonly string[]): string[] {
+    return this.selection ? decorateEditorSelection(rendered, this.selection) : rendered.slice();
   }
 }

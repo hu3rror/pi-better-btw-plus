@@ -218,7 +218,7 @@ describe("decorateEditorSelection", () => {
 
   test("returns the rendered lines unchanged when there is no selection", () => {
     const rendered = renderedBand(["hello"], 6);
-    expect(decorateEditorSelection(rendered, sel([0, 2], [0, 2]))).toBe(rendered);
+    expect(decorateEditorSelection(rendered, sel([0, 2], [0, 2]))).toEqual(rendered);
   });
 });
 
